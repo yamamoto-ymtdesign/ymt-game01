@@ -174,16 +174,17 @@ class Game {
       return;
     }
 
-    // 守備・ルーズボール時: ボールの予測位置に最も近い味方を候補にする
+    // 守備・ルーズボール時: 「ボールと自ゴールを結ぶ直線」の近くに居て
+    // ボールに近い味方を優先する (ボールより敵ゴール側の選手では守備できないため)
     const pred = { x: ball.pos.x + ball.vel.x * 0.4, y: ball.pos.y + ball.vel.y * 0.4 };
     const cands = this.userTeam.outfield()
       .filter((p) => p.state !== "getup" && p.state !== "stumble");
     if (cands.length === 0) return;
 
-    let best = null, bestD = Infinity;
+    let best = null, bestS = Infinity;
     for (const p of cands) {
-      const d = dist(p.pos, pred);
-      if (d < bestD) { bestD = d; best = p; }
+      const sc = this.defensiveScore(p, pred);
+      if (sc < bestS) { bestS = sc; best = p; }
     }
 
     const cur = this.controlled;
@@ -193,11 +194,11 @@ class Game {
       return;
     }
 
-    // Space で手動切替: ボールに近い順に巡回する
-    // (1回目は最寄り、押すたびに次に近い選手へ。自動切替より長めにロック)
+    // Space で手動切替: 守備優先度の高い順に巡回する
+    // (押すたびに次の候補へ。自動切替より長めにロック)
     if (input.wasPressed("Space")) {
       const sorted = cands.slice()
-        .sort((a, b) => dist(a.pos, pred) - dist(b.pos, pred));
+        .sort((a, b) => this.defensiveScore(a, pred) - this.defensiveScore(b, pred));
       const idx = sorted.indexOf(cur);
       this.controlled = sorted[(idx + 1) % sorted.length];
       this.switchLock = SWITCH_CONF.MANUAL_LOCK_TIME;
@@ -205,13 +206,26 @@ class Game {
     }
 
     if (best === cur) return;
-    const curD = dist(cur.pos, pred);
+    const curS = this.defensiveScore(cur, pred);
     // ヒステリシス: ロック解除後、かつ十分な差があるときだけ切替える
     if (this.switchLock <= 0 &&
-        (bestD < curD * SWITCH_CONF.RATIO || curD - bestD > SWITCH_CONF.ABS_GAP)) {
+        (bestS < curS * SWITCH_CONF.RATIO || curS - bestS > SWITCH_CONF.ABS_GAP)) {
       this.controlled = best;
       this.switchLock = SWITCH_CONF.LOCK_TIME;
     }
+  }
+
+  // 守備時の切替優先度 (小さいほど優先)。
+  // 「ボール → 自ゴール」を結ぶ線分への距離と、ボールまでの距離で採点し、
+  // ボールより敵ゴール側 (ゴールサイドでない) の選手には大きなペナルティを課す。
+  defensiveScore(p, ballPos) {
+    const ownGoal = { x: -this.userTeam.attackDir * PITCH.HALF_LEN, y: 0 };
+    const dBall = dist(p.pos, ballPos);
+    const lineDist = pointSegDist(p.pos, ballPos, ownGoal);
+    const toGoal = normTo(ballPos, ownGoal);
+    const rel = { x: p.pos.x - ballPos.x, y: p.pos.y - ballPos.y };
+    const goalSide = dot(rel, toGoal) > -2;   // 2m までは許容
+    return dBall + lineDist * 1.2 + (goalSide ? 0 : 25);
   }
 
   // ---------------- ユーザー操作 ----------------
@@ -227,8 +241,9 @@ class Game {
 
     const ax = input.axis();
     const charging = this.shootCharge >= 0;
+    // C は攻守共通でダッシュ
     const dash = input.isDown("ShiftLeft") || input.isDown("ShiftRight") ||
-                 (hasBall && input.isDown("KeyC"));
+                 input.isDown("KeyC");
 
     let speed;
     if (hasBall) speed = dash ? PLAYER_CONF.DASH_DRIBBLE_SPEED : PLAYER_CONF.DRIBBLE_SPEED;
@@ -265,11 +280,9 @@ class Game {
         }
       }
     } else {
-      // ---- 守備時: Z = カット / X = スライディング / C = 体当たり ----
+      // ---- 守備時: Z / X = スライディング ----
       if (this.shootCharge >= 0) this.shootCharge = -1;
-      if (input.wasPressed("KeyZ")) p.tryTackle(this);
-      else if (input.wasPressed("KeyX")) p.trySlide(this);
-      else if (input.wasPressed("KeyC")) p.tryCharge(this);
+      if (input.wasPressed("KeyZ") || input.wasPressed("KeyX")) p.trySlide(this);
     }
   }
 

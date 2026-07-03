@@ -444,7 +444,7 @@ class Renderer {
     const hasBall = game.ball.owner && game.ball.owner.team === game.userTeam;
     const guide = hasBall
       ? "矢印: ドリブル   Z: パス   X(長押し): シュート   C/Shift: ダッシュ"
-      : "矢印: 移動   Z: 脚を出す   X: スライディング   C: 体当たり   Space: 選手切替   Shift: ダッシュ";
+      : "矢印: 移動   Z/X: スライディング   C/Shift: ダッシュ   Space: 選手切替";
     ctx.fillStyle = "rgba(0,0,0,0.55)";
     this.roundRect(ctx, 10, this.canvas.height - 34, 620, 24, 6);
     ctx.fill();
