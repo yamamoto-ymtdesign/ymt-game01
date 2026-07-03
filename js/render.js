@@ -440,9 +440,8 @@ class Renderer {
     const halfLabel = game.half === 1 ? "前半" : "後半";
     ctx.fillText(halfLabel + " " + fmtTime(game.displayTime()), W / 2 + 38, 27);
 
-    // 操作ガイド (状況に応じて切替)
-    const hasBall = game.ball.owner && game.ball.owner.team === game.userTeam;
-    const guide = hasBall
+    // 操作ガイド (攻守フェーズに応じて切替)
+    const guide = !game.userDefending()
       ? "矢印: ドリブル   Z: パス   X(長押し): シュート   C/Shift: ダッシュ"
       : "矢印: 移動   Z/X: スライディング   C/Shift: ダッシュ   Space: 選手切替";
     ctx.fillStyle = "rgba(0,0,0,0.55)";

@@ -67,6 +67,15 @@ class Game {
     return o ? dist(p.pos, o.pos) : Infinity;
   }
 
+  // ユーザーチームが守備状態か。
+  // 相手がボールを保持しているか、相手が最後に触ったルーズボールのときだけ true。
+  // 味方が保持してから相手が触るまで (パスの飛行中を含む) は攻撃状態のままにする。
+  userDefending() {
+    const owner = this.ball.owner;
+    if (owner) return owner.team !== this.userTeam;
+    return this.ball.lastTouchTeam !== this.userTeam;
+  }
+
   // pos が team の自陣ペナルティエリア内か
   inPenaltyBox(pos, team) {
     const goalX = -team.attackDir * PITCH.HALF_LEN;
@@ -181,9 +190,14 @@ class Game {
       .filter((p) => p.state !== "getup" && p.state !== "stumble");
     if (cands.length === 0) return;
 
+    // 守備時はゴールサイド優先の採点、味方パスの飛行中は単純にボールへの近さ
+    const score = this.userDefending()
+      ? (p) => this.defensiveScore(p, pred)
+      : (p) => dist(p.pos, pred);
+
     let best = null, bestS = Infinity;
     for (const p of cands) {
-      const sc = this.defensiveScore(p, pred);
+      const sc = score(p);
       if (sc < bestS) { bestS = sc; best = p; }
     }
 
@@ -197,8 +211,7 @@ class Game {
     // Space で手動切替: 守備優先度の高い順に巡回する
     // (押すたびに次の候補へ。自動切替より長めにロック)
     if (input.wasPressed("Space")) {
-      const sorted = cands.slice()
-        .sort((a, b) => this.defensiveScore(a, pred) - this.defensiveScore(b, pred));
+      const sorted = cands.slice().sort((a, b) => score(a) - score(b));
       const idx = sorted.indexOf(cur);
       this.controlled = sorted[(idx + 1) % sorted.length];
       this.switchLock = SWITCH_CONF.MANUAL_LOCK_TIME;
@@ -206,7 +219,7 @@ class Game {
     }
 
     if (best === cur) return;
-    const curS = this.defensiveScore(cur, pred);
+    const curS = score(cur);
     // ヒステリシス: ロック解除後、かつ十分な差があるときだけ切替える
     if (this.switchLock <= 0 &&
         (bestS < curS * SWITCH_CONF.RATIO || curS - bestS > SWITCH_CONF.ABS_GAP)) {
@@ -281,8 +294,14 @@ class Game {
       }
     } else {
       // ---- 守備時: Z / X = スライディング ----
+      // 味方保持中・味方パスの飛行中は守備状態にならないため発動しない
+      // (パスを出した同一フレームで受け手に操作が移り、押したままの
+      //  キーで受け手がスライディングしてしまう誤爆の防止)
       if (this.shootCharge >= 0) this.shootCharge = -1;
-      if (input.wasPressed("KeyZ") || input.wasPressed("KeyX")) p.trySlide(this);
+      if (this.userDefending() &&
+          (input.wasPressed("KeyZ") || input.wasPressed("KeyX"))) {
+        p.trySlide(this);
+      }
     }
   }
 
@@ -312,7 +331,8 @@ class Game {
 
   // パス先の選択: 入力方向との一致度・距離・パスコース上の敵で採点する
   // aiMode = true のときは前進するパスを優先する
-  pickPassTarget(p, dir, aiMode) {
+  // relax = true のときは方向の制限を外す (入力方向に誰も居ないときの再検索)
+  pickPassTarget(p, dir, aiMode, relax = false) {
     let best = null, bestScore = -Infinity;
     for (const mate of p.team.players) {
       if (mate === p) continue;
@@ -320,7 +340,7 @@ class Game {
       if (d < 3 || d > 45) continue;
       const n = normTo(p.pos, mate.pos);
       const align = dot(n, dir);
-      if (align < -0.3) continue;   // 真後ろへのパスは選ばない
+      if (!relax && align < -0.3) continue;   // 真後ろへのパスは選ばない
 
       let score = align * 24 - Math.abs(d - 14) * 0.5;
       if (mate.isGK) score -= 30;
@@ -334,6 +354,8 @@ class Game {
       }
       if (score > bestScore) { bestScore = score; best = mate; }
     }
+    // 入力方向に候補が居なければ、方向制限なしで探し直す (パスの不発防止)
+    if (!best && !relax) return this.pickPassTarget(p, dir, aiMode, true);
     return best;
   }
 
