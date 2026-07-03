@@ -32,6 +32,7 @@ class Team {
       p.facing = { x: this.attackDir, y: 0 };
       p.state = "normal";
       p.stateTimer = 0;
+      p.kickAnim = 0;
       p.cooldown = 0;
       p.holdTimer = 0;
       p.moveTarget = null;
@@ -44,6 +45,9 @@ class Team {
   // ユーザーチームでは操作中のキャラを除外する (追走はユーザーの役目)。
   assignChasers(game) {
     for (const p of this.players) p.isChaser = false;
+    // 相手GKがキャッチして保持している間はプレスに行かない
+    const owner = game.ball.owner;
+    if (owner && owner.isGK && owner.team !== this && owner.holdTimer > 0) return;
     const cands = this.outfield()
       .filter((p) => !(this.isUser && p === game.controlled))
       .sort((a, b) => dist(a.pos, game.ball.pos) - dist(b.pos, game.ball.pos));

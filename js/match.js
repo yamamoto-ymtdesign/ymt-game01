@@ -193,12 +193,14 @@ class Game {
       return;
     }
 
-    // Space で手動切替 (ロックを無視して即切替)
+    // Space で手動切替: ボールに近い順に巡回する
+    // (1回目は最寄り、押すたびに次に近い選手へ。自動切替より長めにロック)
     if (input.wasPressed("Space")) {
-      if (best !== cur) {
-        this.controlled = best;
-        this.switchLock = SWITCH_CONF.LOCK_TIME;
-      }
+      const sorted = cands.slice()
+        .sort((a, b) => dist(a.pos, pred) - dist(b.pos, pred));
+      const idx = sorted.indexOf(cur);
+      this.controlled = sorted[(idx + 1) % sorted.length];
+      this.switchLock = SWITCH_CONF.MANUAL_LOCK_TIME;
       return;
     }
 

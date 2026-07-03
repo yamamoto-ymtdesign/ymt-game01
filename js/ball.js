@@ -41,6 +41,7 @@ class Ball {
     this.shieldTimer = ACTION_CONF.KICK_SHIELD_TIME;
     this.lastTouchTeam = player.team;
     player.holdTimer = 0;
+    player.kickAnim = 0.28;   // キックモーションを表示する
   }
 
   update(dt) {

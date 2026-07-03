@@ -28,6 +28,7 @@ class Player {
 
     this.state = "normal";
     this.stateTimer = 0;
+    this.kickAnim = 0;            // キックモーションの残り表示時間 (描画用)
     this.cooldown = 0;            // アクションを再使用できるまでの時間
     this.holdTimer = 0;           // GK がキャッチ後にボールを保持する時間
 
@@ -49,6 +50,7 @@ class Player {
   // ------------------------------------------------------------------
   update(game, dt) {
     this.cooldown = Math.max(0, this.cooldown - dt);
+    this.kickAnim = Math.max(0, this.kickAnim - dt);
 
     if (this.state !== "normal") {
       this.stateTimer -= dt;

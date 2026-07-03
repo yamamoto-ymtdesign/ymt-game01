@@ -1,8 +1,163 @@
 "use strict";
 
 // =====================================================================
-// 描画: ボール追従カメラ + ピッチ / 選手 / ボール / HUD / ミニマップ
+// 描画: ボール追従カメラ + ピッチ / 選手(ドット絵) / ボール / HUD / ミニマップ
+//
+// 選手は 16x16 のピクセルスプライトで描画する。
+// 状態に応じてポーズが切り替わる:
+//   stand / walk1 / walk2 : 待機・走行 (2フレームアニメ)
+//   kick   : パス・シュートの蹴り足 (kickAnim タイマー中)
+//   tackle : 脚を出す (カット)
+//   charge : 体をぶつける (肩から突進)
+//   slide  : スライディング (進行方向に回転させて描く)
+//   転倒 (stumble/getup) : slide スプライトを横倒しで流用
 // =====================================================================
+
+// ---- スプライト定義 ----
+// 記号: H=髪 S=肌 J=ユニフォーム P=パンツ L=ソックス B=シューズ .=透過
+// アクションポーズは「右向き」で描いてあり、左向きは左右反転する
+
+const SPRITE_GRIDS = {
+  stand: [
+    "......HHHH......",
+    ".....HHHHHH.....",
+    ".....SSSSSS.....",
+    ".....SSSSSS.....",
+    "......SSSS......",
+    "....JJJJJJJJ....",
+    "...JJJJJJJJJJ...",
+    "...SJJJJJJJJS...",
+    "...SJJJJJJJJS...",
+    "....JJJJJJJJ....",
+    "....PPPPPPPP....",
+    "....PPPPPPPP....",
+    ".....LL..LL.....",
+    ".....LL..LL.....",
+    ".....LL..LL.....",
+    ".....BB..BB.....",
+  ],
+  walk1: [
+    "......HHHH......",
+    ".....HHHHHH.....",
+    ".....SSSSSS.....",
+    ".....SSSSSS.....",
+    "......SSSS......",
+    "....JJJJJJJJ....",
+    "...JJJJJJJJJJ...",
+    "...SJJJJJJJJS...",
+    "...SJJJJJJJJS...",
+    "....JJJJJJJJ....",
+    "....PPPPPPPP....",
+    "....PPPPPPPP....",
+    "....LL....LL....",
+    "....LL....LL....",
+    "...LL......LL...",
+    "...BB......BB...",
+  ],
+  walk2: [
+    "......HHHH......",
+    ".....HHHHHH.....",
+    ".....SSSSSS.....",
+    ".....SSSSSS.....",
+    "......SSSS......",
+    "....JJJJJJJJ....",
+    "...JJJJJJJJJJ...",
+    "...SJJJJJJJJS...",
+    "...SJJJJJJJJS...",
+    "....JJJJJJJJ....",
+    "....PPPPPPPP....",
+    "....PPPPPPPP....",
+    "......LLLL......",
+    "......LLLL......",
+    "......LLLL......",
+    "......BBBB......",
+  ],
+  // パス・シュート: 蹴り足を前方 (右) へ振り抜く
+  kick: [
+    "......HHHH......",
+    ".....HHHHHH.....",
+    ".....SSSSSS.....",
+    ".....SSSSSS.....",
+    "......SSSS......",
+    "....JJJJJJJJ....",
+    "...JJJJJJJJJJ...",
+    "...SJJJJJJJJS...",
+    "...SJJJJJJJJS...",
+    "....JJJJJJJJ....",
+    "....PPPPPPPP....",
+    "....PPPPPPLLLL..",
+    ".....LL....LLBB.",
+    ".....LL.........",
+    ".....LL.........",
+    ".....BB.........",
+  ],
+  // 脚を出す (カット): 腰を落として足先を低く前へ伸ばす
+  tackle: [
+    "................",
+    "................",
+    "......HHHH......",
+    ".....HHHHHH.....",
+    ".....SSSSSS.....",
+    ".....SSSSSS.....",
+    "......SSSS......",
+    "....JJJJJJJJ....",
+    "...JJJJJJJJJJ...",
+    "...SJJJJJJJJS...",
+    "....JJJJJJJJ....",
+    "....PPPPPPPP....",
+    "....PPPPPPLL....",
+    ".....LL....LLLL.",
+    ".....LL......BB.",
+    ".....BB.........",
+  ],
+  // 体をぶつける: 前傾して肩から当たる
+  charge: [
+    "................",
+    ".......HHHH.....",
+    "......HHHHHH....",
+    "......SSSSSS....",
+    ".......SSSS.....",
+    "....JJJJJJJJJ...",
+    "...JJJJJJJJJJS..",
+    "...JJJJJJJJJJSS.",
+    "...SJJJJJJJJJ...",
+    "....JJJJJJJJ....",
+    "....PPPPPPPP....",
+    "...PPPPPPPP.....",
+    "....LL...LL.....",
+    "...LL....LL.....",
+    "...LL.....LL....",
+    "...BB.....BB....",
+  ],
+  // スライディング: 両腕を広げ脚を伸ばした姿勢。進行方向へ回転させて使う
+  slide: [
+    "......HHHH......",
+    ".....HHHHHH.....",
+    ".....SSSSSS.....",
+    ".....SSSSSS.....",
+    "......SSSS......",
+    "....JJJJJJJJ....",
+    "..JJJJJJJJJJJJ..",
+    "..SSJJJJJJJJSS..",
+    "..SS.JJJJJJ.SS..",
+    "....JJJJJJJJ....",
+    "....PPPPPPPP....",
+    "....PPPPPPPP....",
+    ".....LL..LL.....",
+    ".....LL..LL.....",
+    ".....LL..LL.....",
+    ".....BB..BB.....",
+  ],
+};
+
+const SPRITE_SIZE = 16;
+// チームカラー以外の共通パレット
+const SPRITE_BASE_COLORS = {
+  H: "#2b1f14",
+  S: "#f0c493",
+  P: "#f5f5f5",
+  B: "#1e1e1e",
+};
 
 class Camera {
   constructor(canvas) {
@@ -37,10 +192,40 @@ class Renderer {
     this.canvas = canvas;
     this.ctx = canvas.getContext("2d");
     this.cam = camera;
+    this.spriteCache = new Map();   // "jersey|dark" → { stand: canvas, ... }
+    this.now = 0;
+  }
+
+  // チームカラーごとにスプライト一式をオフスクリーン生成してキャッシュする
+  getSprites(jersey, dark) {
+    const key = jersey + "|" + dark;
+    let set = this.spriteCache.get(key);
+    if (set) return set;
+
+    set = {};
+    for (const [name, grid] of Object.entries(SPRITE_GRIDS)) {
+      const cv = document.createElement("canvas");
+      cv.width = SPRITE_SIZE;
+      cv.height = SPRITE_SIZE;
+      const c = cv.getContext("2d");
+      for (let row = 0; row < grid.length; row++) {
+        for (let col = 0; col < grid[row].length; col++) {
+          const ch = grid[row][col];
+          if (ch === ".") continue;
+          c.fillStyle = ch === "J" ? jersey : ch === "L" ? dark
+            : SPRITE_BASE_COLORS[ch] || "#f0f";
+          c.fillRect(col, row, 1, 1);
+        }
+      }
+      set[name] = cv;
+    }
+    this.spriteCache.set(key, set);
+    return set;
   }
 
   draw(game) {
     const ctx = this.ctx;
+    this.now = performance.now();
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     this.drawPitch();
     if (!game) return;
@@ -116,85 +301,94 @@ class Renderer {
     ctx.fill();
   }
 
-  // ---------------- 選手 ----------------
+  // ---------------- 選手 (ドット絵) ----------------
 
   drawPlayer(p, game) {
     const ctx = this.ctx, cam = this.cam, s = cam.scale;
     const x = cam.sx(p.pos.x), y = cam.sy(p.pos.y);
-    const r = PLAYER_CONF.RADIUS * s * 1.15;
-    const color = p.isGK ? p.team.colors.gk : p.team.colors.main;
+    const cell = s * 0.115;               // スプライト1ドットのピクセルサイズ
+    const w = SPRITE_SIZE * cell, h = SPRITE_SIZE * cell;
+    const jersey = p.isGK ? p.team.colors.gk : p.team.colors.main;
+    const sprites = this.getSprites(jersey, p.team.colors.dark);
 
-    // 影
+    // 影 (足元)
     ctx.fillStyle = "rgba(0,0,0,0.25)";
     ctx.beginPath();
-    ctx.ellipse(x, y + r * 0.45, r * 0.95, r * 0.45, 0, 0, Math.PI * 2);
+    ctx.ellipse(x, y + cell * 2, w * 0.32, cell * 2, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    if (p.state === "slide") {
-      // スライディング: 進行方向に伸びた姿勢で描く
-      const ang = Math.atan2(p.slideDir.y, p.slideDir.x);
-      ctx.save();
-      ctx.translate(x, y);
-      ctx.rotate(ang);
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.ellipse(0, 0, r * 1.7, r * 0.65, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = p.team.colors.dark;
-      ctx.lineWidth = 2;
-      ctx.stroke();
-      ctx.restore();
-    } else {
-      const fallen = p.state === "stumble" || p.state === "getup";
-      ctx.globalAlpha = fallen ? 0.75 : 1;
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      if (fallen) ctx.ellipse(x, y, r * 1.3, r * 0.7, 0, 0, Math.PI * 2);
-      else ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = p.team.colors.dark;
-      ctx.lineWidth = 2;
-      ctx.stroke();
-      ctx.globalAlpha = 1;
-
-      // 向きを示すくちばし
-      if (!fallen) {
-        ctx.fillStyle = p.team.colors.dark;
-        ctx.beginPath();
-        ctx.arc(x + p.facing.x * r * 0.75, y + p.facing.y * r * 0.75, r * 0.3, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
-      // 背番号
-      ctx.fillStyle = "#fff";
-      ctx.font = "bold " + Math.round(r) + "px sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(String(p.num), x, y);
-    }
-
-    // 操作中マーカー
+    // 操作中マーカー (足元のリング)
     if (p === game.controlled) {
       ctx.strokeStyle = "#ffe14d";
-      ctx.lineWidth = 3;
+      ctx.lineWidth = 2.5;
       ctx.beginPath();
-      ctx.arc(x, y, r + 4, 0, Math.PI * 2);
+      ctx.ellipse(x, y + cell * 2, w * 0.42, cell * 2.6, 0, 0, Math.PI * 2);
       ctx.stroke();
+    }
+
+    // 状態からスプライトと回転を決める
+    let img, rot = null;
+    if (p.state === "slide") {
+      img = sprites.slide;
+      // 足が進行方向を向くように回転させる
+      const a = Math.atan2(p.slideDir.y, p.slideDir.x);
+      rot = a - Math.PI / 2;
+    } else if (p.state === "stumble" || p.state === "getup") {
+      img = sprites.slide;   // 横倒し = 転倒
+      rot = p.facing.x >= 0 ? Math.PI / 2 : -Math.PI / 2;
+    } else if (p.state === "tackle") {
+      img = sprites.tackle;
+    } else if (p.state === "charge") {
+      img = sprites.charge;
+    } else if (p.kickAnim > 0) {
+      img = sprites.kick;
+    } else if (vlen(p.vel) > 1.5) {
+      // 走行アニメ (選手ごとに位相をずらす)
+      img = Math.floor(this.now / 140 + p.num * 7) % 2 === 0
+        ? sprites.walk1 : sprites.walk2;
+    } else {
+      img = sprites.stand;
+    }
+
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    ctx.translate(x, y);
+    if (rot !== null) {
+      ctx.rotate(rot);
+      ctx.drawImage(img, -w / 2, -h / 2, w, h);
+    } else {
+      if (p.facing.x < 0) ctx.scale(-1, 1);   // 左向きは反転
+      ctx.drawImage(img, -w / 2, -h + cell * 2, w, h);
+    }
+    ctx.restore();
+
+    // 背番号 (頭上)
+    ctx.font = "bold 10px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "alphabetic";
+    ctx.strokeStyle = "rgba(0,0,0,0.7)";
+    ctx.lineWidth = 2.5;
+    ctx.lineJoin = "round";   // 鋭角グリフ("4"など)のマイター突起を防ぐ
+    ctx.strokeText(String(p.num), x, y - h + 1);
+    ctx.fillStyle = "#fff";
+    ctx.fillText(String(p.num), x, y - h + 1);
+
+    // 操作中マーカー (頭上の三角) とシュートゲージ
+    if (p === game.controlled) {
       ctx.fillStyle = "#ffe14d";
       ctx.beginPath();
-      ctx.moveTo(x, y - r - 16);
-      ctx.lineTo(x - 7, y - r - 26);
-      ctx.lineTo(x + 7, y - r - 26);
+      ctx.moveTo(x, y - h - 6);
+      ctx.lineTo(x - 6, y - h - 15);
+      ctx.lineTo(x + 6, y - h - 15);
       ctx.closePath();
       ctx.fill();
 
-      // シュートの溜めゲージ
       if (game.shootCharge >= 0) {
-        const w = 44, h = 7;
+        const gw = 44, gh = 7;
         ctx.fillStyle = "rgba(0,0,0,0.55)";
-        ctx.fillRect(x - w / 2, y - r - 40, w, h);
+        ctx.fillRect(x - gw / 2, y - h - 30, gw, gh);
         ctx.fillStyle = game.shootCharge < 0.7 ? "#7ee36a" : "#ff8b3d";
-        ctx.fillRect(x - w / 2 + 1, y - r - 39, (w - 2) * game.shootCharge, h - 2);
+        ctx.fillRect(x - gw / 2 + 1, y - h - 29, (gw - 2) * game.shootCharge, gh - 2);
       }
     }
   }
