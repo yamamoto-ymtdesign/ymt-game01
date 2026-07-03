@@ -54,6 +54,15 @@ const ACTION_CONF = {
   SHOOT_SPEED_MAX: 33,
   SHOOT_CHARGE_TIME: 0.8,     // シュートの最大溜め時間(秒)
 
+  // GKのシュート対応:
+  //  ボール速度 <= GK_CATCH_MAX_SPEED ならキャッチ。
+  //  それを超える強シュートは弾く(パリー)だけで、GK_PARRY_TIME の間
+  //  倒れ込んで動けなくなる。さらに至近距離からの強シュートは
+  //  GKが反応しきれず正面でも抜けることがある。
+  GK_CATCH_MAX_SPEED: 26,
+  GK_PARRY_TIME: 1.0,         // パリー後に動けない時間
+  GK_PARRY_REBOUND: 0.32,     // 弾いたボールに残る速度の割合
+
   TACKLE_RANGE: 1.7,          // 「脚を出す(カット)」の届く距離
   TACKLE_TIME: 0.3,
   TACKLE_COOLDOWN: 0.5,

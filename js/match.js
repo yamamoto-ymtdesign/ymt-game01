@@ -321,8 +321,8 @@ class Game {
   shoot(p, aimY, power) {
     const goalX = PITCH.HALF_LEN * p.team.attackDir;
     const dGoal = Math.hypot(goalX - p.pos.x, p.pos.y);
-    // 強打・遠距離ほどブレる
-    const err = (Math.random() - 0.5) * (1.2 + power * 2.2 + dGoal * 0.08);
+    // 近距離ほど正確。強打の精度ペナルティは控えめにして溜める価値を出す
+    const err = (Math.random() - 0.5) * (0.8 + power * 1.0 + dGoal * 0.1);
     const targetY = clamp(aimY, -(PITCH.GOAL_HALF - 0.5), PITCH.GOAL_HALF - 0.5) + err;
     const speed = ACTION_CONF.SHOOT_SPEED_MIN +
       power * (ACTION_CONF.SHOOT_SPEED_MAX - ACTION_CONF.SHOOT_SPEED_MIN);
@@ -376,12 +376,18 @@ class Game {
       if (ball.shieldTimer > 0 && ball.shieldPlayer === p) continue;
 
       const gkCatch = p.isGK && this.inPenaltyBox(ball.pos, p.team);
-      const radius = gkCatch ? 1.6 : BALL_CONF.CONTROL_RADIUS;
-      const maxSpeed = gkCatch ? 34 : BALL_CONF.CONTROL_MAX_SPEED;
+      // 強シュートほどGKの届く範囲は狭くなる
+      const radius = gkCatch
+        ? (speed > ACTION_CONF.GK_CATCH_MAX_SPEED ? 1.3 : 1.6)
+        : BALL_CONF.CONTROL_RADIUS;
       if (d > radius) continue;
 
-      if (speed <= maxSpeed) {
+      if (speed <= BALL_CONF.CONTROL_MAX_SPEED) {
         this.givePossession(p);
+        return;
+      }
+      if (gkCatch) {
+        this.gkHandleShot(p);
         return;
       }
       // 速すぎるボールは体に当たって勢いを失う
@@ -392,6 +398,45 @@ class Game {
         return;
       }
     }
+  }
+
+  // GKがシュートに対応する: キャッチ / 弾く(パリー) / 反応できず抜かれる
+  gkHandleShot(gk) {
+    const ball = this.ball;
+    const speed = vlen(ball.vel);
+
+    // 十分遅ければキャッチ
+    if (speed <= ACTION_CONF.GK_CATCH_MAX_SPEED) {
+      this.givePossession(gk);
+      return;
+    }
+
+    // 強シュート: 至近距離ほどGKが反応しきれず正面でも抜ける
+    const goalX = -gk.team.attackDir * PITCH.HALF_LEN;
+    const dGoal = Math.hypot(ball.pos.x - goalX, ball.pos.y);
+    const breakProb = clamp((speed - 27) / 15, 0, 0.45) *
+                      clamp((14 - dGoal) / 14, 0, 1);
+    if (Math.random() < breakProb) {
+      // 飛びつくが触れずに抜かれる
+      gk.stumble(0.6);
+      ball.vel.x *= 0.92;
+      ball.vel.y *= 0.92;
+      ball.shieldPlayer = gk;
+      ball.shieldTimer = 0.5;
+      return;
+    }
+
+    // パリー: 横〜手前に弾き、GKはしばらく倒れて動けない (こぼれ球チャンス)
+    const inDir = norm(ball.vel.x, ball.vel.y);
+    const side = ball.pos.y >= gk.pos.y ? 1 : -1;
+    const perp = { x: -inDir.y * side, y: inDir.x * side };
+    const out = norm(perp.x - inDir.x * 0.35, perp.y - inDir.y * 0.35);
+    const outSpeed = Math.max(7, speed * ACTION_CONF.GK_PARRY_REBOUND);
+    ball.vel = { x: out.x * outSpeed, y: out.y * outSpeed };
+    ball.lastTouchTeam = gk.team;
+    ball.shieldPlayer = gk;
+    ball.shieldTimer = 0.5;
+    gk.stumble(ACTION_CONF.GK_PARRY_TIME);
   }
 
   // 選手同士の重なりを解消する
