@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>2Dサッカー</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div id="stage">
+    <canvas id="game" width="960" height="540"></canvas>
+
+    <!-- タイトル / 設定 -->
+    <div id="screen-menu" class="screen">
+      <h1>⚽ 2Dサッカー</h1>
+      <p class="subtitle">BLUES (青) を操作して REDS (赤) に勝利しよう</p>
+      <div class="settings">
+        <label>
+          前後半の長さ
+          <select id="sel-half">
+            <option value="1">各 1 分</option>
+            <option value="2">各 2 分</option>
+            <option value="3">各 3 分</option>
+            <option value="5" selected>各 5 分</option>
+            <option value="7">各 7 分</option>
+            <option value="10">各 10 分</option>
+          </select>
+        </label>
+        <label>
+          難易度
+          <select id="sel-diff">
+            <option value="easy">やさしい</option>
+            <option value="normal" selected>ふつう</option>
+            <option value="hard">むずかしい</option>
+          </select>
+        </label>
+      </div>
+      <button id="btn-start" class="primary">試合開始 (Enter)</button>
+      <div class="help">
+        <table>
+          <tr><th></th><th>攻撃時 (ボール保持)</th><th>守備時</th></tr>
+          <tr><td>矢印キー</td><td>ドリブル</td><td>移動</td></tr>
+          <tr><td>Z</td><td>パス</td><td>脚を出す (カット)</td></tr>
+          <tr><td>X</td><td>シュート (長押しで強く)</td><td>スライディング</td></tr>
+          <tr><td>C</td><td>ダッシュ</td><td>体をぶつける</td></tr>
+          <tr><td>Space</td><td>-</td><td>操作選手の切替</td></tr>
+          <tr><td>Shift</td><td colspan="2">ダッシュ (共通)</td></tr>
+          <tr><td>Esc</td><td colspan="2">ポーズ</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <!-- ポーズ -->
+    <div id="screen-pause" class="screen">
+      <h2>ポーズ</h2>
+      <button id="btn-resume" class="primary">再開 (Esc)</button>
+      <button id="btn-quit">タイトルへ戻る</button>
+    </div>
+
+    <!-- ハーフタイム -->
+    <div id="screen-halftime" class="screen">
+      <h2>前半終了</h2>
+      <button id="btn-secondhalf" class="primary">後半開始 (Enter)</button>
+    </div>
+
+    <!-- リザルト -->
+    <div id="screen-result" class="screen">
+      <h2>試合終了</h2>
+      <p id="result-text" class="result-text"></p>
+      <p id="result-score" class="result-score"></p>
+      <button id="btn-result-title" class="primary">タイトルへ戻る</button>
+    </div>
+  </div>
+
+  <script src="js/config.js"></script>
+  <script src="js/utils.js"></script>
+  <script src="js/input.js"></script>
+  <script src="js/ball.js"></script>
+  <script src="js/player.js"></script>
+  <script src="js/team.js"></script>
+  <script src="js/match.js"></script>
+  <script src="js/render.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
