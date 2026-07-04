@@ -458,8 +458,12 @@ class Renderer {
     ctx.fillText(halfLabel + " " + fmtTime(game.displayTime()), W / 2 + 38, 27);
 
     // 操作ガイド (攻守フェーズに応じて切替)
+    const userRestart = game.restartPassOnly &&
+      game.ball.owner === game.controlled;
     const guide = (game.volley && game.volley.active)
       ? "★ X: ダイレクトシュート!!"
+      : userRestart
+      ? "矢印: 向き変更   Z: パス (リスタートはパスのみ)"
       : !game.userDefending()
       ? "矢印: ドリブル   Z: パス   X(長押し): シュート   C/Shift: ダッシュ"
       : "矢印: 移動   Z/X: スライディング   C/Shift: ダッシュ   Space: 選手切替";

@@ -41,7 +41,10 @@ const PLAYER_CONF = {
   RUN_SPEED: 7.0,
   DASH_SPEED: 9.0,
   DRIBBLE_SPEED: 6.2,         // ボール保持時は少し遅くなる
-  DASH_DRIBBLE_SPEED: 7.8,
+  // ボール保持時のダッシュはフリー時 (9.0) より大幅に遅くする。
+  // 保持者が速すぎるとドリブルだけでゴール前まで運べてしまうため
+  DASH_DRIBBLE_SPEED: 7.0,
+  CHASE_BOOST: 1.12,          // 守備チェイサーの追走速度倍率 (保持者に追いつける)
   GK_SPEED: 6.6,
   ACCEL: 26,                  // 加速度 (m/s^2)
 };

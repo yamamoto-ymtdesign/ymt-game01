@@ -227,6 +227,13 @@ class Player {
 
   // ボールを持っている AI: シュート / パス / ドリブル を選ぶ
   aiWithBall(game, dt) {
+    // リスタート (キックイン等) はドリブルせず必ずパスから始める
+    if (game.restartPassOnly && game.restartTaker === this) {
+      const target = game.pickPassTarget(this, { x: this.team.attackDir, y: 0 }, true);
+      if (target) game.pass(this, target);
+      else game.ball.kick(this, this.facing, 12);
+      return;
+    }
     const diff = game.diffFor(this.team);
     const goal = { x: PITCH.HALF_LEN * this.team.attackDir, y: 0 };
     this.thinkTimer -= dt;
@@ -289,7 +296,8 @@ class Player {
       const target = ball.owner
         ? { x: ball.owner.pos.x, y: ball.owner.pos.y }
         : { x: ball.pos.x + ball.vel.x * 0.3, y: ball.pos.y + ball.vel.y * 0.3 };
-      this.moveSpeed = PLAYER_CONF.RUN_SPEED * diff.aiSpeed;
+      // チェイサーはブーストして追走し、ドリブルで振り切られないようにする
+      this.moveSpeed = PLAYER_CONF.RUN_SPEED * PLAYER_CONF.CHASE_BOOST * diff.aiSpeed;
       this.moveTarget = target;
 
       // 近づいたら確率的にタックルを仕掛ける

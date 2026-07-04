@@ -43,6 +43,8 @@ class Game {
     this.shootCharge = -1;      // シュート溜め (0〜1 / -1 = 溜めていない)
     this.pendingKickoffTeam = null;
     this.volley = null;         // ダイレクトシュートの状態 {active, failed}
+    this.restartPassOnly = false; // リスタート(キックイン等)はパス以外禁止
+    this.restartTaker = null;     // リスタートの出し手
 
     this.setupKickoff(this.userTeam, "キックオフ");
   }
@@ -156,6 +158,11 @@ class Game {
   }
 
   updatePlay(dt, input) {
+    // リスタートの出し手がボールを手放したら「パスのみ」制限を解除
+    if (this.restartPassOnly && this.ball.owner !== this.restartTaker) {
+      this.restartPassOnly = false;
+      this.restartTaker = null;
+    }
     this.updateSwitching(input);
     this.updateVolleyState();
     this.userTeam.assignChasers(this);
@@ -271,6 +278,25 @@ class Game {
       p.facing = { x: ax.x, y: ax.y };
     } else {
       p.moveTarget = null;
+    }
+
+    if (hasBall && this.restartPassOnly) {
+      // ---- リスタート (キックイン等): パスのみ。移動せず向きだけ変えられる ----
+      p.moveTarget = null;
+      if (ax) p.facing = { x: ax.x, y: ax.y };
+      if (input.wasPressed("KeyZ")) {
+        const dir = ax || { x: p.facing.x, y: p.facing.y };
+        const target = this.pickPassTarget(p, dir, false);
+        if (target) {
+          this.pass(p, target);
+          this.controlled = target;
+          this.switchLock = 0.4;
+        } else {
+          // 万一パス相手が見つからなければ向いている方向へ蹴り出す
+          this.ball.kick(p, dir, 12);
+        }
+      }
+      return;
     }
 
     if (hasBall) {
@@ -588,6 +614,9 @@ class Game {
     }
 
     this.givePossession(taker);
+    // リスタートは必ずパスから始める (ドリブル・シュート禁止)
+    this.restartPassOnly = true;
+    this.restartTaker = taker;
     this.setFreeze(1.1, label);
   }
 }
