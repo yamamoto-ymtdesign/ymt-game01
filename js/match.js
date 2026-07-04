@@ -111,7 +111,7 @@ class Game {
     striker.pos = { x: -kickTeam.attackDir * 1.2, y: 0 };
     striker.facing = { x: kickTeam.attackDir, y: 0 };
     this.givePossession(striker);
-    if (!this.controlled) this.controlled = this.userTeam.players[4]; // 中央MF
+    if (!this.controlled) this.controlled = this.userTeam.players[5]; // 中央MF
     this.setFreeze(1.4, text);
   }
 

@@ -1,7 +1,7 @@
 "use strict";
 
 // =====================================================================
-// チーム: 7人の選手 (GK + フィールド6人) と攻撃方向を持つ
+// チーム: 9人の選手 (GK + フィールド8人) と攻撃方向を持つ
 // =====================================================================
 
 class Team {
@@ -11,7 +11,7 @@ class Team {
     this.isUser = isUser;
     this.attackDir = attackDir; // +1 = 右へ攻める / -1 = 左へ攻める
     this.colors = colors;       // { main, dark, gk }
-    this.players = FORMATION_7.map((slot, i) => new Player(this, slot, i + 1));
+    this.players = FORMATION_9.map((slot, i) => new Player(this, slot, i + 1));
     this.gk = this.players[0];
   }
 
