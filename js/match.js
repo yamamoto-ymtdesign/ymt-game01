@@ -42,6 +42,7 @@ class Game {
     this.switchLock = 0;        // 自動切替のロック残り時間
     this.shootCharge = -1;      // シュート溜め (0〜1 / -1 = 溜めていない)
     this.pendingKickoffTeam = null;
+    this.volley = null;         // ダイレクトシュートの状態 {active, failed}
 
     this.setupKickoff(this.userTeam, "キックオフ");
   }
@@ -156,6 +157,7 @@ class Game {
 
   updatePlay(dt, input) {
     this.updateSwitching(input);
+    this.updateVolleyState();
     this.userTeam.assignChasers(this);
     this.cpuTeam.assignChasers(this);
 
@@ -293,14 +295,21 @@ class Game {
         }
       }
     } else {
-      // ---- 守備時: Z / X = スライディング ----
-      // 味方保持中・味方パスの飛行中は守備状態にならないため発動しない
-      // (パスを出した同一フレームで受け手に操作が移り、押したままの
-      //  キーで受け手がスライディングしてしまう誤爆の防止)
       if (this.shootCharge >= 0) this.shootCharge = -1;
-      if (this.userDefending() &&
-          (input.wasPressed("KeyZ") || input.wasPressed("KeyX"))) {
-        p.trySlide(this);
+      if (this.userDefending()) {
+        // ---- 守備時: Z / X = スライディング ----
+        // 味方保持中・味方パスの飛行中は守備状態にならないため発動しない
+        // (パスを出した同一フレームで受け手に操作が移り、押したままの
+        //  キーで受け手がスライディングしてしまう誤爆の防止)
+        if (input.wasPressed("KeyZ") || input.wasPressed("KeyX")) {
+          p.trySlide(this);
+        }
+      } else if (input.wasPressed("KeyX") && this.volley) {
+        // ---- 味方パスの飛行中: X = ダイレクトシュート ----
+        // 受け手が光っている間 (VOLLEY_CONF.WINDOW 秒) だけ成立。
+        // 窓の外で押すと、このパスでの権利を失う (連打対策)
+        if (this.volley.active) this.doVolley(p, input.axis());
+        else this.volley.failed = true;
       }
     }
   }
@@ -319,14 +328,56 @@ class Game {
   }
 
   shoot(p, aimY, power) {
+    this.shootFrom(p, p.pos, aimY, power);
+  }
+
+  // origin の位置からゴールへ向けて蹴る (通常シュートとダイレクトシュートで共用)
+  shootFrom(p, origin, aimY, power) {
     const goalX = PITCH.HALF_LEN * p.team.attackDir;
-    const dGoal = Math.hypot(goalX - p.pos.x, p.pos.y);
+    const dGoal = Math.hypot(goalX - origin.x, origin.y);
     // 近距離ほど正確。強打の精度ペナルティは控えめにして溜める価値を出す
     const err = (Math.random() - 0.5) * (0.8 + power * 1.0 + dGoal * 0.1);
     const targetY = clamp(aimY, -(PITCH.GOAL_HALF - 0.5), PITCH.GOAL_HALF - 0.5) + err;
     const speed = ACTION_CONF.SHOOT_SPEED_MIN +
       power * (ACTION_CONF.SHOOT_SPEED_MAX - ACTION_CONF.SHOOT_SPEED_MIN);
-    this.ball.kick(p, normTo(p.pos, { x: goalX, y: targetY }), speed);
+    const dir = normTo(origin, { x: goalX, y: targetY });
+    this.ball.kick(p, dir, speed);
+  }
+
+  // ---------------- ダイレクトシュート ----------------
+
+  // 毎フレーム、受け手が「光る窓」の中に居るかを判定する。
+  // 条件: 味方が蹴ったボールが飛行中 / 操作キャラ(=受け手)が相手ゴールの
+  //       ZONE 以内 / ボールが受け手へ向かっていて、到達まで WINDOW 秒以内
+  updateVolleyState() {
+    const ball = this.ball;
+    if (ball.owner || ball.lastTouchTeam !== this.userTeam) {
+      this.volley = null;
+      return;
+    }
+    if (!this.volley) this.volley = { active: false, failed: false };
+
+    const r = this.controlled;
+    const speed = vlen(ball.vel);
+    let active = false;
+    if (r && !r.busy && !this.volley.failed && speed >= VOLLEY_CONF.MIN_BALL_SPEED) {
+      const goalX = PITCH.HALF_LEN * this.userTeam.attackDir;
+      const dGoal = Math.hypot(goalX - r.pos.x, r.pos.y);
+      const approaching = dot(ball.vel, { x: r.pos.x - ball.pos.x, y: r.pos.y - ball.pos.y }) > 0;
+      // トラップ圏 (CONTROL_RADIUS) に入るまでの残り時間で判定する。
+      // トラップされた瞬間に窓は閉じるので、光る時間はほぼ WINDOW 秒になる
+      const tArrive = Math.max(0, dist(ball.pos, r.pos) - BALL_CONF.CONTROL_RADIUS) / speed;
+      active = dGoal < VOLLEY_CONF.ZONE && approaching && tArrive <= VOLLEY_CONF.WINDOW;
+    }
+    this.volley.active = active;
+  }
+
+  // ダイレクトシュートの実行: トラップせずボールの現在位置から直接ゴールへ
+  doVolley(p, ax) {
+    const aimY = ax ? ax.y * 2.6 : 0;   // 通常シュートと同じく上下でコース調整
+    this.shootFrom(p, this.ball.pos, aimY, VOLLEY_CONF.POWER);
+    p.kickAnim = 0.28;
+    this.volley = null;
   }
 
   // パス先の選択: 入力方向との一致度・距離・パスコース上の敵で採点する

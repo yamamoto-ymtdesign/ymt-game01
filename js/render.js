@@ -326,6 +326,23 @@ class Renderer {
       ctx.stroke();
     }
 
+    // ダイレクトシュートの入力窓: 受け手を光らせる
+    if (p === game.controlled && game.volley && game.volley.active) {
+      const pulse = 0.65 + 0.35 * Math.sin(this.now / 28);
+      const grad = ctx.createRadialGradient(x, y - h * 0.35, 2, x, y - h * 0.35, w * 0.9);
+      grad.addColorStop(0, "rgba(255,250,170," + (0.55 * pulse) + ")");
+      grad.addColorStop(1, "rgba(255,250,170,0)");
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(x, y - h * 0.35, w * 0.9, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,190," + pulse + ")";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(x, y - h * 0.35, w * 0.62, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
     // 状態からスプライトと回転を決める
     let img, rot = null;
     if (p.state === "slide") {
@@ -441,7 +458,9 @@ class Renderer {
     ctx.fillText(halfLabel + " " + fmtTime(game.displayTime()), W / 2 + 38, 27);
 
     // 操作ガイド (攻守フェーズに応じて切替)
-    const guide = !game.userDefending()
+    const guide = (game.volley && game.volley.active)
+      ? "★ X: ダイレクトシュート!!"
+      : !game.userDefending()
       ? "矢印: ドリブル   Z: パス   X(長押し): シュート   C/Shift: ダッシュ"
       : "矢印: 移動   Z/X: スライディング   C/Shift: ダッシュ   Space: 選手切替";
     ctx.fillStyle = "rgba(0,0,0,0.55)";
