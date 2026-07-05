@@ -99,7 +99,8 @@ class Game {
   givePossession(p) {
     this.ball.setOwner(p);
     if (p.isGK) p.holdTimer = 1.3;
-    if (p.team.isUser && !p.isGK) this.controlled = p;
+    // 味方GKが保持した場合も操作キャラにする (ロングキック/パスを選べるようにする)
+    if (p.team.isUser) this.controlled = p;
   }
 
   // ---------------- キックオフ・前後半 ----------------
@@ -186,8 +187,8 @@ class Game {
     const ball = this.ball;
     const owner = ball.owner;
 
-    // 味方の保持者 (GK 以外) は常に操作対象
-    if (owner && owner.team === this.userTeam && !owner.isGK) {
+    // 味方の保持者は常に操作対象 (GK 保持中も含む)
+    if (owner && owner.team === this.userTeam) {
       this.controlled = owner;
       return;
     }
@@ -280,6 +281,26 @@ class Game {
       p.moveTarget = null;
     }
 
+    if (hasBall && p.isGK) {
+      // ---- 味方GKが保持: Z = ロングキック / X = 近くの味方へショートパス ----
+      // (ゴールキックのリスタートもここで処理するため restartPassOnly より先に判定)
+      if (input.wasPressed("KeyZ")) {
+        this.gkLongKick(p, ax);
+        return;
+      }
+      if (input.wasPressed("KeyX")) {
+        const target = this.pickNearestTeammate(p, ax);
+        if (target) {
+          this.pass(p, target);
+          this.controlled = target;
+          this.switchLock = 0.4;
+        } else {
+          this.gkLongKick(p, ax);   // 近くに味方が居なければロングキックで逃がす
+        }
+      }
+      return;
+    }
+
     if (hasBall && this.restartPassOnly) {
       // ---- リスタート (キックイン等): パスのみ。移動せず向きだけ変えられる ----
       p.moveTarget = null;
@@ -330,12 +351,18 @@ class Game {
         if (input.wasPressed("KeyZ") || input.wasPressed("KeyX")) {
           p.trySlide(this);
         }
-      } else if (input.wasPressed("KeyX") && this.volley) {
-        // ---- 味方パスの飛行中: X = ダイレクトシュート ----
+      } else if (this.volley) {
+        // ---- 味方パスの飛行中: X = ダイレクトシュート / Z = ワンタッチパス ----
         // 受け手が光っている間 (VOLLEY_CONF.WINDOW 秒) だけ成立。
-        // 窓の外で押すと、このパスでの権利を失う (連打対策)
-        if (this.volley.active) this.doVolley(p, input.axis());
-        else this.volley.failed = true;
+        // 窓の外で押すと、そのパスでの権利を失う (連打対策)。X/Z は独立に判定
+        if (input.wasPressed("KeyX")) {
+          if (this.volley.active) this.doVolley(p, ax);
+          else this.volley.failed = true;
+        }
+        if (input.wasPressed("KeyZ")) {
+          if (this.volley.passActive) this.doOneTouchPass(p, ax);
+          else this.volley.passFailed = true;
+        }
       }
     }
   }
@@ -343,14 +370,58 @@ class Game {
   // ---------------- キック (パス・シュート) ----------------
 
   pass(from, to, powerMul = 1) {
-    const d = dist(from.pos, to.pos);
+    this.passFrom(from, from.pos, to, powerMul);
+  }
+
+  // origin からパスを出す (通常のパスとワンタッチパスで共用)
+  passFrom(from, origin, to, powerMul = 1) {
+    const d = dist(origin, to.pos);
     const speed = clamp(9 + d * 0.85,
       ACTION_CONF.PASS_SPEED_MIN, ACTION_CONF.PASS_SPEED_MAX) * powerMul;
     // 受け手の移動を先読みして少し前へ出す
     const t = d / speed;
     const lead = { x: to.pos.x + to.vel.x * t * 0.8, y: to.pos.y + to.vel.y * t * 0.8 };
-    this.ball.kick(from, normTo(from.pos, lead), speed);
+    this.ball.kick(from, normTo(origin, lead), speed);
     from.thinkTimer = 0.3;
+  }
+
+  // GK のロングキック: 前方の味方 (居なければ入力方向) へ強く蹴り出す
+  gkLongKick(gk, ax) {
+    const dir = ax || { x: gk.team.attackDir, y: 0 };
+    const speed = ACTION_CONF.GK_LONG_KICK_SPEED;
+    const target = this.pickPassTarget(gk, dir, true, false, ACTION_CONF.GK_LONG_KICK_RANGE);
+    let outDir;
+    if (target) {
+      const t = dist(gk.pos, target.pos) / speed;
+      const lead = {
+        x: target.pos.x + target.vel.x * t * 0.7,
+        y: target.pos.y + target.vel.y * t * 0.7,
+      };
+      outDir = normTo(gk.pos, lead);
+    } else {
+      outDir = norm(dir.x, dir.y);
+    }
+    this.ball.kick(gk, outDir, speed);
+    gk.thinkTimer = 0.3;
+  }
+
+  // GK のショートパス相手を選ぶ: 純粋に「近さ」優先 (通常パスの中距離優先とは別基準)
+  pickNearestTeammate(p, dir) {
+    let best = null, bestScore = -Infinity;
+    for (const mate of p.team.players) {
+      if (mate === p) continue;
+      const d = dist(p.pos, mate.pos);
+      if (d < 2.5 || d > 30) continue;
+      const align = dir ? dot(normTo(p.pos, mate.pos), dir) : 0;
+      if (dir && align < -0.3) continue;
+      let score = -d + align * 6;
+      if (mate.busy) score -= 10;
+      for (const opp of this.opponentsOf(p.team)) {
+        if (pointSegDist(opp.pos, p.pos, mate.pos) < 1.4) score -= 15;
+      }
+      if (score > bestScore) { bestScore = score; best = mate; }
+    }
+    return best;
   }
 
   shoot(p, aimY, power) {
@@ -370,32 +441,37 @@ class Game {
     this.ball.kick(p, dir, speed);
   }
 
-  // ---------------- ダイレクトシュート ----------------
+  // ---------------- ワンタッチアクション (ダイレクトシュート / ワンタッチパス) ----------------
 
   // 毎フレーム、受け手が「光る窓」の中に居るかを判定する。
-  // 条件: 味方が蹴ったボールが飛行中 / 操作キャラ(=受け手)が相手ゴールの
-  //       ZONE 以内 / ボールが受け手へ向かっていて、到達まで WINDOW 秒以内
+  // 条件: 味方が蹴ったボールが飛行中 / ボールが操作キャラ(=受け手)へ向かっていて、
+  //       トラップ圏に入るまで WINDOW 秒以内。
+  // ダイレクトシュート(X)は相手ゴールから ZONE 以内でのみ成立し、
+  // ワンタッチパス(Z)はピッチのどこでも成立する。成否 (failed/passFailed) は独立管理。
   updateVolleyState() {
     const ball = this.ball;
     if (ball.owner || ball.lastTouchTeam !== this.userTeam) {
       this.volley = null;
       return;
     }
-    if (!this.volley) this.volley = { active: false, failed: false };
+    if (!this.volley) {
+      this.volley = { active: false, failed: false, passActive: false, passFailed: false };
+    }
 
     const r = this.controlled;
     const speed = vlen(ball.vel);
-    let active = false;
-    if (r && !r.busy && !this.volley.failed && speed >= VOLLEY_CONF.MIN_BALL_SPEED) {
-      const goalX = PITCH.HALF_LEN * this.userTeam.attackDir;
-      const dGoal = Math.hypot(goalX - r.pos.x, r.pos.y);
+    let windowOpen = false;
+    if (r && !r.busy && speed >= VOLLEY_CONF.MIN_BALL_SPEED) {
       const approaching = dot(ball.vel, { x: r.pos.x - ball.pos.x, y: r.pos.y - ball.pos.y }) > 0;
       // トラップ圏 (CONTROL_RADIUS) に入るまでの残り時間で判定する。
       // トラップされた瞬間に窓は閉じるので、光る時間はほぼ WINDOW 秒になる
       const tArrive = Math.max(0, dist(ball.pos, r.pos) - BALL_CONF.CONTROL_RADIUS) / speed;
-      active = dGoal < VOLLEY_CONF.ZONE && approaching && tArrive <= VOLLEY_CONF.WINDOW;
+      windowOpen = approaching && tArrive <= VOLLEY_CONF.WINDOW;
     }
-    this.volley.active = active;
+    const goalX = r ? PITCH.HALF_LEN * this.userTeam.attackDir : 0;
+    const dGoal = r ? Math.hypot(goalX - r.pos.x, r.pos.y) : Infinity;
+    this.volley.active = windowOpen && !this.volley.failed && dGoal < VOLLEY_CONF.ZONE;
+    this.volley.passActive = windowOpen && !this.volley.passFailed;
   }
 
   // ダイレクトシュートの実行: トラップせずボールの現在位置から直接ゴールへ
@@ -406,15 +482,28 @@ class Game {
     this.volley = null;
   }
 
+  // ワンタッチパスの実行 (ワンツーなど): トラップせずボールの現在位置から
+  // 別の味方へ即座に繋ぐ。入力方向に居なければ通常パスと同じ基準で選ぶ
+  doOneTouchPass(p, ax) {
+    const dir = ax || { x: p.facing.x, y: p.facing.y };
+    const target = this.pickPassTarget(p, dir, false);
+    if (!target) return;   // 見つからなければ通常通りトラップさせる (窓はまだ開いたまま)
+    this.passFrom(p, this.ball.pos, target);
+    this.controlled = target;
+    this.switchLock = 0.4;
+    this.volley = null;
+  }
+
   // パス先の選択: 入力方向との一致度・距離・パスコース上の敵で採点する
   // aiMode = true のときは前進するパスを優先する
   // relax = true のときは方向の制限を外す (入力方向に誰も居ないときの再検索)
-  pickPassTarget(p, dir, aiMode, relax = false) {
+  // maxDist: 候補とする距離の上限 (GK のロングキックでは通常より広く取る)
+  pickPassTarget(p, dir, aiMode, relax = false, maxDist = 45) {
     let best = null, bestScore = -Infinity;
     for (const mate of p.team.players) {
       if (mate === p) continue;
       const d = dist(p.pos, mate.pos);
-      if (d < 3 || d > 45) continue;
+      if (d < 3 || d > maxDist) continue;
       const n = normTo(p.pos, mate.pos);
       const align = dot(n, dir);
       if (!relax && align < -0.3) continue;   // 真後ろへのパスは選ばない
@@ -432,7 +521,7 @@ class Game {
       if (score > bestScore) { bestScore = score; best = mate; }
     }
     // 入力方向に候補が居なければ、方向制限なしで探し直す (パスの不発防止)
-    if (!best && !relax) return this.pickPassTarget(p, dir, aiMode, true);
+    if (!best && !relax) return this.pickPassTarget(p, dir, aiMode, true, maxDist);
     return best;
   }
 

@@ -458,10 +458,20 @@ class Renderer {
     ctx.fillText(halfLabel + " " + fmtTime(game.displayTime()), W / 2 + 38, 27);
 
     // 操作ガイド (攻守フェーズに応じて切替)
-    const userRestart = game.restartPassOnly &&
+    const gkHolding = game.ball.owner === game.controlled &&
+      game.controlled && game.controlled.isGK;
+    const userRestart = !gkHolding && game.restartPassOnly &&
       game.ball.owner === game.controlled;
-    const guide = (game.volley && game.volley.active)
-      ? "★ X: ダイレクトシュート!!"
+    const volleyHint = game.volley && (game.volley.active || game.volley.passActive)
+      ? "★ " + [
+          game.volley.active ? "X: ダイレクトシュート!!" : null,
+          game.volley.passActive ? "Z: ワンタッチパス!!" : null,
+        ].filter(Boolean).join("   ")
+      : null;
+    const guide = volleyHint
+      ? volleyHint
+      : gkHolding
+      ? "矢印: 移動   Z: ロングキック   X: 近くの味方へパス"
       : userRestart
       ? "矢印: 向き変更   Z: パス (リスタートはパスのみ)"
       : !game.userDefending()
