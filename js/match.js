@@ -556,8 +556,12 @@ class Game {
         this.gkHandleShot(p);
         return;
       }
-      // 速すぎるボールは体に当たって勢いを失う
+      // 速すぎるボールは体に当たって勢いを失う。
+      // 強いシュートが直撃した場合はフィールドプレーヤーも倒れる
       if (d < 0.7) {
+        if (!p.isGK && speed > ACTION_CONF.GK_CATCH_MAX_SPEED) {
+          p.stumble(ACTION_CONF.FIELD_SHOT_STUMBLE_TIME);
+        }
         ball.vel.x *= 0.3;
         ball.vel.y *= 0.3;
         ball.lastTouchTeam = p.team;

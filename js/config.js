@@ -83,8 +83,13 @@ const ACTION_CONF = {
   CHARGE_TIME: 0.25,
   CHARGE_COOLDOWN: 0.8,
 
-  STUMBLE_TIME: 0.8,          // 転倒・よろけの持続時間
+  STUMBLE_TIME: 1.2,          // スライディングで倒された選手の起き上がりまでの時間
+  CHARGE_STUMBLE_TIME: 0.55,  // 「体をぶつける」で倒れた選手の起き上がりまでの時間
   KICK_SHIELD_TIME: 0.35,     // 蹴った直後に自分で再トラップできない時間
+
+  // 強いシュート (GK_CATCH_MAX_SPEED を超える速さ) が直撃したフィールド
+  // プレーヤーも倒れるようにする
+  FIELD_SHOT_STUMBLE_TIME: 0.7,
 };
 
 // ---- ワンタッチアクション (ダイレクトシュート / ワンタッチパス) ----

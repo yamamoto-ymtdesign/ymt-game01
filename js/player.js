@@ -162,7 +162,7 @@ class Player {
         owner && (owner.team === this.team || (owner.isGK && owner.holdTimer > 0));
       if (!protectedBall) {
         this.slideHit = true;
-        if (owner) owner.stumble(0.6);
+        if (owner) owner.stumble(ACTION_CONF.STUMBLE_TIME);
         // 大きく蹴り出す
         const d = norm(this.slideDir.x + rand(-0.35, 0.35), this.slideDir.y + rand(-0.35, 0.35));
         ball.kick(this, d, 11);
@@ -198,7 +198,7 @@ class Player {
     const n = normTo(this.pos, best.pos);
     best.vel.x += n.x * 7;
     best.vel.y += n.y * 7;
-    best.stumble(0.55);
+    best.stumble(ACTION_CONF.CHARGE_STUMBLE_TIME);
     this.vel.x += n.x * 3;   // 自分も少し前へ踏み込む
     this.vel.y += n.y * 3;
 
