@@ -45,6 +45,7 @@ class Game {
     this.volley = null;         // ダイレクトシュートの状態 {active, failed}
     this.restartPassOnly = false; // リスタート(キックイン等)はパス以外禁止
     this.restartTaker = null;     // リスタートの出し手
+    this.inputIdleFrames = 0;     // ユーザーが無入力のまま経過したフレーム数
 
     this.setupKickoff(this.userTeam, "キックオフ");
   }
@@ -164,6 +165,11 @@ class Game {
       this.restartPassOnly = false;
       this.restartTaker = null;
     }
+    // 矢印キー/アクションキーが何も入力されていないフレーム数を数える
+    // (自動切替は、操作中に横取りされないよう無入力が続いたときだけ行う)
+    if (this.hasUserInput(input)) this.inputIdleFrames = 0;
+    else this.inputIdleFrames++;
+
     this.updateSwitching(input);
     this.updateVolleyState();
     this.userTeam.assignChasers(this);
@@ -182,6 +188,14 @@ class Game {
   }
 
   // ---------------- 操作キャラの自動切替 ----------------
+
+  // 移動・アクションのいずれかのキーが入力されているか (Space による
+  // 手動切替は含めない。自動切替の抑制判定にのみ使う)
+  hasUserInput(input) {
+    return input.axis() !== null ||
+      input.isDown("KeyZ") || input.isDown("KeyX") || input.isDown("KeyC") ||
+      input.isDown("ShiftLeft") || input.isDown("ShiftRight");
+  }
 
   updateSwitching(input) {
     const ball = this.ball;
@@ -230,8 +244,9 @@ class Game {
 
     if (best === cur) return;
     const curS = score(cur);
-    // ヒステリシス: ロック解除後、かつ十分な差があるときだけ切替える
-    if (this.switchLock <= 0 &&
+    // ヒステリシス: ロック解除後・無入力が一定フレーム続いた後、
+    // かつ十分な差があるときだけ切替える (操作中の横取り防止)
+    if (this.switchLock <= 0 && this.inputIdleFrames >= SWITCH_CONF.IDLE_FRAMES &&
         (bestS < curS * SWITCH_CONF.RATIO || curS - bestS > SWITCH_CONF.ABS_GAP)) {
       this.controlled = best;
       this.switchLock = SWITCH_CONF.LOCK_TIME;
