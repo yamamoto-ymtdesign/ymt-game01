@@ -415,17 +415,25 @@ class Renderer {
   drawBall(game) {
     const ctx = this.ctx, cam = this.cam;
     const b = game.ball;
-    const x = cam.sx(b.pos.x), y = cam.sy(b.pos.y);
+    const groundX = cam.sx(b.pos.x), groundY = cam.sy(b.pos.y);
     const r = Math.max(4, BALL_CONF.RADIUS * cam.scale * 1.4);
 
-    ctx.fillStyle = "rgba(0,0,0,0.3)";
+    // 浮き球 (GK のロングキックなど): 高さぶんボールを持ち上げ、
+    // 影は小さく薄く、ボール本体は少し大きく見せて高度感を出す
+    const h = b.loftHeight();
+    const liftPx = h * cam.scale * 0.55;
+    const shadowScale = clamp(1 - h * 0.12, 0.5, 1);
+    const ballR = r * (1 + Math.min(0.4, h * 0.1));
+    const x = groundX, y = groundY - liftPx;
+
+    ctx.fillStyle = `rgba(0,0,0,${(0.3 * shadowScale).toFixed(3)})`;
     ctx.beginPath();
-    ctx.ellipse(x + 2, y + 3, r, r * 0.5, 0, 0, Math.PI * 2);
+    ctx.ellipse(groundX + 2, groundY + 3, r * shadowScale, r * 0.5 * shadowScale, 0, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.fillStyle = "#ffffff";
     ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.arc(x, y, ballR, 0, Math.PI * 2);
     ctx.fill();
     ctx.strokeStyle = "#333";
     ctx.lineWidth = 1.5;

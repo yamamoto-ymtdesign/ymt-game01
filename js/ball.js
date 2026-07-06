@@ -5,6 +5,9 @@
 //  - owner が居る間は保持者の前方に追従する (ドリブル)
 //  - フリーの間は摩擦で減速しながら転がる
 //  - shield: 蹴った直後の選手が即座に再トラップするのを防ぐ
+//  - airborne: 浮き球 (GK のロングキックなど) の間、誰も (敵味方とも)
+//    トラップ・タックルで触れられない。ハーフライン付近に到達するか
+//    最大時間が経過すると着地し、通常通り誰でも触れるようになる
 // =====================================================================
 
 class Ball {
@@ -15,6 +18,11 @@ class Ball {
     this.shieldPlayer = null;   // 直前に蹴った選手
     this.shieldTimer = 0;
     this.lastTouchTeam = null;  // 最後に触れたチーム (アウトオブプレー判定用)
+
+    this.airborne = false;      // 浮き球かどうか
+    this.airborneTimer = 0;     // 着地までの残り時間
+    this.airborneTotal = 0;     // 浮き球の想定総時間 (描画の高さ計算に使用)
+    this.landingSide = 0;       // 着地判定に使う攻撃方向 (+1/-1)
   }
 
   reset(pos) {
@@ -23,6 +31,9 @@ class Ball {
     this.owner = null;
     this.shieldPlayer = null;
     this.shieldTimer = 0;
+    this.airborne = false;
+    this.airborneTimer = 0;
+    this.landingSide = 0;
   }
 
   setOwner(player) {
@@ -31,6 +42,7 @@ class Ball {
     this.shieldPlayer = null;
     this.shieldTimer = 0;
     this.lastTouchTeam = player.team;
+    this.airborne = false;
   }
 
   // 選手 player が dir 方向へ speed でボールを蹴り出す
@@ -42,6 +54,25 @@ class Ball {
     this.lastTouchTeam = player.team;
     player.holdTimer = 0;
     player.kickAnim = 0.28;   // キックモーションを表示する
+    this.airborne = false;
+  }
+
+  // GK のロングキックなど、浮き球として蹴り出す。
+  // landingSide (通常はキッカーの攻撃方向) 側へハーフライン付近まで
+  // 誰にも触れられずに飛んでいく
+  launchLofted(player, dir, speed, landingSide) {
+    this.kick(player, dir, speed);
+    this.airborne = true;
+    this.airborneTimer = BALL_CONF.LOFT_MAX_TIME;
+    this.airborneTotal = BALL_CONF.LOFT_MAX_TIME;
+    this.landingSide = landingSide;
+  }
+
+  // 現在の見かけの浮き上がり高さ (描画用。地上なら 0)
+  loftHeight() {
+    if (!this.airborne || this.airborneTotal <= 0) return 0;
+    const progress = clamp(1 - this.airborneTimer / this.airborneTotal, 0, 1);
+    return Math.sin(progress * Math.PI) * BALL_CONF.LOFT_PEAK_HEIGHT;
   }
 
   update(dt) {
@@ -61,6 +92,24 @@ class Ball {
 
     this.pos.x += this.vel.x * dt;
     this.pos.y += this.vel.y * dt;
+
+    if (this.airborne) {
+      this.airborneTimer -= dt;
+      const decay = Math.exp(-BALL_CONF.LOFT_FRICTION * dt);
+      this.vel.x *= decay;
+      this.vel.y *= decay;
+
+      // 山なりの後半 (下降中) かつハーフライン付近まで来たら着地。
+      // それ以外は最大時間経過で強制的に着地させる
+      const progress = 1 - this.airborneTimer / this.airborneTotal;
+      const descending = progress >= 0.5;
+      const reachedZone = this.landingSide !== 0 &&
+        this.pos.x * this.landingSide >= -BALL_CONF.LOFT_LANDING_MARGIN;
+      if (this.airborneTimer <= 0 || (descending && reachedZone)) {
+        this.airborne = false;
+      }
+      return;
+    }
 
     const decay = Math.exp(-BALL_CONF.FRICTION * dt);
     this.vel.x *= decay;

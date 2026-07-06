@@ -244,9 +244,13 @@ class Game {
 
     if (best === cur) return;
     const curS = score(cur);
-    // ヒステリシス: ロック解除後・無入力が一定フレーム続いた後、
+    // 現在の操作キャラが守備の役に立たないほど離れている場合は、
+    // 入力中でも (無入力を待たず) 強制的に切替える
+    const farOverride = curS > SWITCH_CONF.FAR_OVERRIDE_GAP;
+    // ヒステリシス: ロック解除後・(無入力が一定フレーム続いた or 遠すぎる)後、
     // かつ十分な差があるときだけ切替える (操作中の横取り防止)
-    if (this.switchLock <= 0 && this.inputIdleFrames >= SWITCH_CONF.IDLE_FRAMES &&
+    if (this.switchLock <= 0 &&
+        (this.inputIdleFrames >= SWITCH_CONF.IDLE_FRAMES || farOverride) &&
         (bestS < curS * SWITCH_CONF.RATIO || curS - bestS > SWITCH_CONF.ABS_GAP)) {
       this.controlled = best;
       this.switchLock = SWITCH_CONF.LOCK_TIME;
@@ -254,16 +258,19 @@ class Game {
   }
 
   // 守備時の切替優先度 (小さいほど優先)。
-  // 「ボール → 自ゴール」を結ぶ線分への距離と、ボールまでの距離で採点し、
-  // ボールより敵ゴール側 (ゴールサイドでない) の選手には大きなペナルティを課す。
+  // ボールへの距離・「ボール → 自ゴール」線への整列に加えて、
+  // ピッチの前後方向 (attackDir 軸) でボールより敵陣側 (前) にいる選手を
+  // その分だけ大きく減点する。左右にどれだけずれていても、ボールより
+  // 前にいる選手は守備に間に合わないため、確実に選ばれにくくする。
   defensiveScore(p, ballPos) {
-    const ownGoal = { x: -this.userTeam.attackDir * PITCH.HALF_LEN, y: 0 };
+    const dir = this.userTeam.attackDir;
+    const ownGoal = { x: -dir * PITCH.HALF_LEN, y: 0 };
     const dBall = dist(p.pos, ballPos);
     const lineDist = pointSegDist(p.pos, ballPos, ownGoal);
-    const toGoal = normTo(ballPos, ownGoal);
-    const rel = { x: p.pos.x - ballPos.x, y: p.pos.y - ballPos.y };
-    const goalSide = dot(rel, toGoal) > -2;   // 2m までは許容
-    return dBall + lineDist * 1.2 + (goalSide ? 0 : 25);
+    // + ならボールより敵陣側 (前)。守備に回れないのでペナルティを科す
+    const aheadOfBall = (p.pos.x - ballPos.x) * dir;
+    const aheadPenalty = Math.max(0, aheadOfBall) * SWITCH_CONF.AHEAD_PENALTY;
+    return dBall + lineDist * 0.8 + aheadPenalty;
   }
 
   // ---------------- ユーザー操作 ----------------
@@ -400,7 +407,8 @@ class Game {
     from.thinkTimer = 0.3;
   }
 
-  // GK のロングキック: 前方の味方 (居なければ入力方向) へ強く蹴り出す
+  // GK のロングキック: 前方の味方 (居なければ入力方向) へ浮き球で強く蹴り出す。
+  // ハーフライン付近まで敵味方とも触れられない (Ball.launchLofted)
   gkLongKick(gk, ax) {
     const dir = ax || { x: gk.team.attackDir, y: 0 };
     const speed = ACTION_CONF.GK_LONG_KICK_SPEED;
@@ -416,7 +424,7 @@ class Game {
     } else {
       outDir = norm(dir.x, dir.y);
     }
-    this.ball.kick(gk, outDir, speed);
+    this.ball.launchLofted(gk, outDir, speed, gk.team.attackDir);
     gk.thinkTimer = 0.3;
   }
 
@@ -545,6 +553,7 @@ class Game {
   // フリーのボールを近くの選手がトラップする
   tryPickups() {
     const ball = this.ball;
+    if (ball.airborne) return;   // 浮き球は着地するまで誰も触れない
     const speed = vlen(ball.vel);
     const players = this.allPlayers()
       .slice()

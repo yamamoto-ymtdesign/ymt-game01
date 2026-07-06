@@ -113,6 +113,7 @@ class Player {
     this.cooldown = ACTION_CONF.TACKLE_COOLDOWN;
 
     const ball = game.ball;
+    if (ball.airborne) return;   // 浮き球には当たり判定なし
     if (dist(this.pos, ball.pos) > ACTION_CONF.TACKLE_RANGE) return;
     // 前方 (約100度) のボールにしか届かない
     if (dot(normTo(this.pos, ball.pos), this.facing) < 0.1) return;
@@ -157,7 +158,8 @@ class Player {
     const ball = game.ball;
     const owner = ball.owner;
 
-    if (!this.slideHit && dist(this.pos, ball.pos) < ACTION_CONF.SLIDE_RANGE) {
+    // 浮き球には当たり判定なし (巻き込んだ相手を転ばせる処理は別途下で継続)
+    if (!ball.airborne && !this.slideHit && dist(this.pos, ball.pos) < ACTION_CONF.SLIDE_RANGE) {
       const protectedBall =
         owner && (owner.team === this.team || (owner.isGK && owner.holdTimer > 0));
       if (!protectedBall) {
