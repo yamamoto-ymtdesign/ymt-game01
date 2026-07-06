@@ -5,9 +5,20 @@
 // 切替とメインループを管理する
 // =====================================================================
 
+// PWA: オフラインでも起動できるよう Service Worker を登録する
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(() => {
+      /* file:// 直開きなど登録できない環境では黙って諦める */
+    });
+  });
+}
+
 window.addEventListener("DOMContentLoaded", () => {
   const canvas = document.getElementById("game");
   const input = new Input();
+  setupTouchControls(input);
+  window.__input = input;   // デバッグ/動作確認用に入力状態を公開
   const camera = new Camera(canvas);
   const renderer = new Renderer(canvas, camera);
 
@@ -21,6 +32,7 @@ window.addEventListener("DOMContentLoaded", () => {
   const selDiff = document.getElementById("sel-diff");
   const resultText = document.getElementById("result-text");
   const resultScore = document.getElementById("result-score");
+  const touchControls = document.getElementById("touch-controls");
 
   let game = null;
   let paused = false;
@@ -31,6 +43,9 @@ window.addEventListener("DOMContentLoaded", () => {
     for (const key of Object.keys(screens)) {
       screens[key].classList.toggle("visible", key === name);
     }
+    // タイトル/ポーズ/ハーフタイム/リザルト画面ではタッチ操作を隠す
+    // (プレー中 = showScreen(null) のときだけ表示する)
+    if (touchControls) touchControls.classList.toggle("hide-touch", name !== null);
   }
 
   function showTitle() {
@@ -50,6 +65,7 @@ window.addEventListener("DOMContentLoaded", () => {
     paused = false;
     camera.pos = { x: 0, y: 0 };
     showScreen(null);
+    window.__game = game;   // デバッグ/動作確認用に現在の試合状態を公開
   }
 
   function showResult() {

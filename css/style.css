@@ -19,6 +19,14 @@ body {
   position: relative;
   width: min(96vw, calc(96vh * 16 / 9));
   aspect-ratio: 16 / 9;
+  touch-action: none;   /* ピンチズーム・スクロールを無効化 (タッチ操作の誤爆防止) */
+}
+
+/* 画面が小さい端末では余白を切り詰めて画面いっぱいに使う */
+@media (max-width: 900px), (max-height: 520px) {
+  #stage {
+    width: min(100vw, calc(100vh * 16 / 9));
+  }
 }
 
 #game {
@@ -140,4 +148,143 @@ button.primary:hover {
 
 .result-score {
   font-size: 22px;
+}
+
+/* =====================================================================
+   タッチ操作 (仮想スティック + アクションボタン)
+   指で操作する端末 (pointer: coarse) でのみ表示する。
+   マウス/トラックパッドのデスクトップでは常に非表示のまま。
+   ===================================================================== */
+
+#touch-controls {
+  position: absolute;
+  inset: 0;
+  display: none;         /* pointer:coarse のときだけ表示 */
+  pointer-events: none;  /* 個々のボタン/スティックだけ再度有効にする */
+  z-index: 5;
+}
+
+@media (pointer: coarse) {
+  #touch-controls {
+    display: block;
+  }
+}
+
+/* タイトル/ポーズ/ハーフタイム/リザルト画面では、下のメニューが
+   隠れないようタッチ操作を非表示にする (js/main.js の showScreen) */
+#touch-controls.hide-touch {
+  display: none !important;
+}
+
+.touch-btn {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  background: rgba(20, 24, 31, 0.55);
+  color: #fff;
+  font-weight: bold;
+  font-size: 15px;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.touch-btn:active,
+.touch-btn.pressed {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+/* 仮想スティック (左下) */
+.touch-stick-base {
+  position: absolute;
+  left: max(18px, env(safe-area-inset-left));
+  bottom: max(18px, env(safe-area-inset-bottom));
+  width: 108px;
+  height: 108px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.touch-stick-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 46px;
+  height: 46px;
+  margin: -23px 0 0 -23px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.55);
+  transition: none;
+}
+
+/* アクションボタン (右下、扇状に配置) */
+.touch-btn-x {
+  right: max(22px, env(safe-area-inset-right));
+  bottom: max(22px, env(safe-area-inset-bottom));
+  width: 72px;
+  height: 72px;
+  font-size: 20px;
+  border-color: #ffe14d;
+}
+
+.touch-btn-z {
+  right: max(88px, calc(env(safe-area-inset-right) + 88px));
+  bottom: max(70px, calc(env(safe-area-inset-bottom) + 70px));
+  width: 62px;
+  height: 62px;
+}
+
+.touch-btn-c {
+  right: max(6px, env(safe-area-inset-right));
+  bottom: max(102px, calc(env(safe-area-inset-bottom) + 102px));
+  width: 54px;
+  height: 54px;
+  font-size: 14px;
+}
+
+.touch-btn-switch {
+  right: max(112px, calc(env(safe-area-inset-right) + 112px));
+  bottom: max(148px, calc(env(safe-area-inset-bottom) + 148px));
+  width: 46px;
+  height: 46px;
+  font-size: 16px;
+}
+
+.touch-pause {
+  top: max(10px, env(safe-area-inset-top));
+  right: max(10px, env(safe-area-inset-right));
+  width: 38px;
+  height: 38px;
+  font-size: 15px;
+  border-radius: 8px;
+}
+
+/* 縦向き推奨バナー (操作は妨げない) */
+#rotate-hint {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: 6px 10px;
+  text-align: center;
+  font-size: 12px;
+  color: #ffe14d;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 8px 8px 0 0;
+  pointer-events: none;
+  display: none;
+  z-index: 6;
+}
+
+@media (pointer: coarse) and (orientation: portrait) {
+  #rotate-hint {
+    display: block;
+  }
 }

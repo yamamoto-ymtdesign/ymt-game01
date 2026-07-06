@@ -1,0 +1,16 @@
+{
+  "name": "2Dサッカー",
+  "short_name": "2Dサッカー",
+  "description": "キーボード/タッチで遊べる2Dサッカーゲーム",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#14181f",
+  "theme_color": "#14181f",
+  "lang": "ja",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
