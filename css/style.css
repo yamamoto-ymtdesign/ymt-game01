@@ -4,6 +4,11 @@
   box-sizing: border-box;
 }
 
+html, body {
+  height: 100%;
+  overflow: hidden;   /* スクロールでステージがずれてタッチ操作がずれるのを防ぐ */
+}
+
 body {
   background: #14181f;
   color: #eee;
@@ -12,13 +17,20 @@ body {
   align-items: center;
   justify-content: center;
   min-height: 100vh;
+  /* dvh 対応ブラウザではアドレスバー分を除いた「実際に見えている高さ」を使う。
+     100vh のままだとスマホでアドレスバー分だけ画面下がはみ出し、
+     タッチ操作 (仮想スティック等) が画面外に出てしまうことがある */
+  min-height: 100dvh;
 }
 
 /* キャンバスとオーバーレイをまとめるステージ (16:9 を維持して拡縮) */
 #stage {
   position: relative;
   width: min(96vw, calc(96vh * 16 / 9));
+  width: min(96vw, calc(96dvh * 16 / 9));
   aspect-ratio: 16 / 9;
+  max-height: 96vh;
+  max-height: 96dvh;
   touch-action: none;   /* ピンチズーム・スクロールを無効化 (タッチ操作の誤爆防止) */
 }
 
@@ -26,6 +38,9 @@ body {
 @media (max-width: 900px), (max-height: 520px) {
   #stage {
     width: min(100vw, calc(100vh * 16 / 9));
+    width: min(100vw, calc(100dvh * 16 / 9));
+    max-height: 100vh;
+    max-height: 100dvh;
   }
 }
 
@@ -50,6 +65,8 @@ body {
   background: rgba(10, 14, 20, 0.85);
   border-radius: 8px;
   text-align: center;
+  overflow-y: auto;   /* 縦幅が狭い端末でメニューが収まらない場合に内部でスクロール */
+  padding: 12px 0;
 }
 
 .screen.visible {
@@ -179,6 +196,7 @@ button.primary:hover {
 .touch-btn {
   position: absolute;
   display: flex;
+  flex-direction: column;   /* 2行ラベル (パス/滑り込み 等) を縦に積む */
   align-items: center;
   justify-content: center;
   border-radius: 50%;
@@ -187,10 +205,19 @@ button.primary:hover {
   color: #fff;
   font-weight: bold;
   font-size: 15px;
+  line-height: 1.15;
+  padding: 2px;
+  text-align: center;
+  white-space: nowrap;
   -webkit-tap-highlight-color: transparent;
   user-select: none;
   pointer-events: auto;
   touch-action: none;
+}
+
+.touch-btn span {
+  display: block;
+  white-space: nowrap;
 }
 
 .touch-btn:active,
@@ -198,11 +225,12 @@ button.primary:hover {
   background: rgba(255, 255, 255, 0.28);
 }
 
-/* 仮想スティック (左下) */
+/* 仮想スティック (左下)。Android のジェスチャーナビゲーションバーに
+   指が触れてしまわないよう、下・左とも十分な余白を確保する */
 .touch-stick-base {
   position: absolute;
-  left: max(18px, env(safe-area-inset-left));
-  bottom: max(18px, env(safe-area-inset-bottom));
+  left: max(20px, calc(env(safe-area-inset-left) + 14px));
+  bottom: max(28px, calc(env(safe-area-inset-bottom) + 22px));
   width: 108px;
   height: 108px;
   border-radius: 50%;
@@ -210,6 +238,19 @@ button.primary:hover {
   border: 2px solid rgba(255, 255, 255, 0.3);
   pointer-events: auto;
   touch-action: none;
+}
+
+/* 縦幅が小さい端末ではボタン一式を少し小さくして収まりを良くする */
+@media (max-height: 420px) {
+  .touch-stick-base {
+    width: 92px;
+    height: 92px;
+  }
+  .touch-stick-knob {
+    width: 40px;
+    height: 40px;
+    margin: -20px 0 0 -20px;
+  }
 }
 
 .touch-stick-knob {
@@ -224,37 +265,41 @@ button.primary:hover {
   transition: none;
 }
 
-/* アクションボタン (右下、扇状に配置) */
+/* アクションボタン (右下、扇状に配置)。ジョイスティック同様、
+   下端に十分な余白を取ってジェスチャーナビゲーションバーを避ける */
 .touch-btn-x {
-  right: max(22px, env(safe-area-inset-right));
-  bottom: max(22px, env(safe-area-inset-bottom));
+  right: max(26px, calc(env(safe-area-inset-right) + 14px));
+  bottom: max(32px, calc(env(safe-area-inset-bottom) + 22px));
   width: 72px;
   height: 72px;
-  font-size: 20px;
+  font-size: 11px;
+  line-height: 1.15;
   border-color: #ffe14d;
 }
 
 .touch-btn-z {
-  right: max(88px, calc(env(safe-area-inset-right) + 88px));
-  bottom: max(70px, calc(env(safe-area-inset-bottom) + 70px));
+  right: max(92px, calc(env(safe-area-inset-right) + 80px));
+  bottom: max(80px, calc(env(safe-area-inset-bottom) + 70px));
   width: 62px;
   height: 62px;
+  font-size: 10px;
+  line-height: 1.15;
 }
 
 .touch-btn-c {
-  right: max(6px, env(safe-area-inset-right));
-  bottom: max(102px, calc(env(safe-area-inset-bottom) + 102px));
+  right: max(10px, env(safe-area-inset-right));
+  bottom: max(112px, calc(env(safe-area-inset-bottom) + 102px));
   width: 54px;
   height: 54px;
-  font-size: 14px;
+  font-size: 10px;
 }
 
 .touch-btn-switch {
-  right: max(112px, calc(env(safe-area-inset-right) + 112px));
-  bottom: max(148px, calc(env(safe-area-inset-bottom) + 148px));
+  right: max(116px, calc(env(safe-area-inset-right) + 104px));
+  bottom: max(158px, calc(env(safe-area-inset-bottom) + 148px));
   width: 46px;
   height: 46px;
-  font-size: 16px;
+  font-size: 11px;
 }
 
 .touch-pause {
@@ -264,6 +309,14 @@ button.primary:hover {
   height: 38px;
   font-size: 15px;
   border-radius: 8px;
+}
+
+/* 縦幅が小さい端末ではボタン一式を少し小さくして収まりを良くする */
+@media (max-height: 420px) {
+  .touch-btn-x { width: 62px; height: 62px; }
+  .touch-btn-z { width: 54px; height: 54px; bottom: max(70px, calc(env(safe-area-inset-bottom) + 62px)); }
+  .touch-btn-c { width: 46px; height: 46px; bottom: max(96px, calc(env(safe-area-inset-bottom) + 88px)); }
+  .touch-btn-switch { width: 40px; height: 40px; bottom: max(134px, calc(env(safe-area-inset-bottom) + 126px)); }
 }
 
 /* 縦向き推奨バナー (操作は妨げない) */

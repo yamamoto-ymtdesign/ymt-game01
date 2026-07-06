@@ -57,7 +57,19 @@ window.addEventListener("DOMContentLoaded", () => {
     showScreen("menu");
   }
 
+  // タッチ操作端末では、ブラウザのアドレスバー等に画面を圧迫されないよう
+  // 試合開始と同時に全画面表示を試みる (対応していない/拒否された場合は無視)
+  function requestFullscreenIfTouch() {
+    if (!matchMedia("(pointer: coarse)").matches) return;
+    const el = document.documentElement;
+    const fn = el.requestFullscreen || el.webkitRequestFullscreen;
+    if (!fn) return;
+    const result = fn.call(el);
+    if (result && typeof result.catch === "function") result.catch(() => {});
+  }
+
   function startMatch() {
+    requestFullscreenIfTouch();
     Settings.data.halfLengthMin = Number(selHalf.value);
     Settings.data.difficulty = selDiff.value;
     Settings.save();
@@ -80,11 +92,13 @@ window.addEventListener("DOMContentLoaded", () => {
 
   document.getElementById("btn-start").addEventListener("click", startMatch);
   document.getElementById("btn-resume").addEventListener("click", () => {
+    requestFullscreenIfTouch();
     paused = false;
     showScreen(null);
   });
   document.getElementById("btn-quit").addEventListener("click", showTitle);
   document.getElementById("btn-secondhalf").addEventListener("click", () => {
+    requestFullscreenIfTouch();
     game.startSecondHalf();
     showScreen(null);
   });
