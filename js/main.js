@@ -61,12 +61,28 @@ window.addEventListener("DOMContentLoaded", () => {
   // 試合開始と同時に全画面表示を試みる (対応していない/拒否された場合は無視)
   function requestFullscreenIfTouch() {
     if (!matchMedia("(pointer: coarse)").matches) return;
+    if (document.fullscreenElement) return;   // 既に全画面なら何もしない
     const el = document.documentElement;
     const fn = el.requestFullscreen || el.webkitRequestFullscreen;
     if (!fn) return;
     const result = fn.call(el);
     if (result && typeof result.catch === "function") result.catch(() => {});
   }
+
+  // 手動での全画面トグル (タイトル画面からでも使える固定ボタン)
+  function toggleFullscreen() {
+    if (document.fullscreenElement) {
+      (document.exitFullscreen || (() => {})).call(document);
+      return;
+    }
+    const el = document.documentElement;
+    const fn = el.requestFullscreen || el.webkitRequestFullscreen;
+    if (!fn) return;
+    const result = fn.call(el);
+    if (result && typeof result.catch === "function") result.catch(() => {});
+  }
+  const touchFullscreenBtn = document.getElementById("touch-fullscreen");
+  if (touchFullscreenBtn) touchFullscreenBtn.addEventListener("click", toggleFullscreen);
 
   function startMatch() {
     requestFullscreenIfTouch();

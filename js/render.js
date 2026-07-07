@@ -194,9 +194,6 @@ class Renderer {
     this.cam = camera;
     this.spriteCache = new Map();   // "jersey|dark" → { stand: canvas, ... }
     this.now = 0;
-    // タッチ操作端末では右下にアクションボタンが重なるため、ミニマップを右上に移す
-    this.isTouch = typeof matchMedia === "function" &&
-      matchMedia("(pointer: coarse)").matches;
   }
 
   // チームカラーごとにスプライト一式をオフスクリーン生成してキャッシュする
@@ -509,12 +506,12 @@ class Renderer {
     }
   }
 
-  // ミニマップ (通常は右下、タッチ操作端末ではアクションボタンと重ならないよう右上): 全体の陣形が分かるレーダー
+  // ミニマップ (右下): 全体の陣形が分かるレーダー
   drawMinimap(game) {
     const ctx = this.ctx;
     const mw = 170, mh = 112;
     const ox = this.canvas.width - mw - 10;
-    const oy = this.isTouch ? 46 : this.canvas.height - mh - 10;
+    const oy = this.canvas.height - mh - 10;
     const kx = (mw - 10) / PITCH.LENGTH;
     const ky = (mh - 10) / PITCH.WIDTH;
     const mx = (x) => ox + mw / 2 + x * kx;

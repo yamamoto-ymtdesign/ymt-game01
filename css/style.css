@@ -44,6 +44,22 @@ body {
   }
 }
 
+/* タッチ操作端末の横向き: ジョイスティック/ボタンをピッチの上に重ねず
+   左右の余白 (ガター) に置けるよう、その分だけステージを狭くする。
+   body が中央寄せするので左右均等に余白ができる */
+@media (pointer: coarse) and (orientation: landscape) {
+  #stage {
+    width: min(calc(100vw - 300px), calc(100dvh * 16 / 9));
+    max-height: 100dvh;
+  }
+}
+
+@media (pointer: coarse) and (orientation: landscape) and (max-width: 760px) {
+  #stage {
+    width: min(calc(100vw - 220px), calc(100dvh * 16 / 9));
+  }
+}
+
 #game {
   width: 100%;
   height: 100%;
@@ -174,7 +190,10 @@ button.primary:hover {
    ===================================================================== */
 
 #touch-controls {
-  position: absolute;
+  /* fixed にして #stage (ピッチ) ではなく画面全体を基準に配置する。
+     #stage が横向きで狭められた分だけ左右にできる余白 (ガター) に
+     ジョイスティック/ボタンを置き、ピッチの上に重ねないため */
+  position: fixed;
   inset: 0;
   display: none;         /* pointer:coarse のときだけ表示 */
   pointer-events: none;  /* 個々のボタン/スティックだけ再度有効にする */
@@ -265,11 +284,12 @@ button.primary:hover {
   transition: none;
 }
 
-/* アクションボタン (右下、扇状に配置)。ジョイスティック同様、
-   下端に十分な余白を取ってジェスチャーナビゲーションバーを避ける */
+/* アクションボタン (右側の余白に縦一列で配置)。中心を右端から同じ距離に
+   揃えることで、幅の異なるボタンでも一直線に積み上がって見える。
+   下端に十分な余白を取ってジェスチャーナビゲーションバーも避ける */
 .touch-btn-x {
-  right: max(26px, calc(env(safe-area-inset-right) + 14px));
-  bottom: max(32px, calc(env(safe-area-inset-bottom) + 22px));
+  right: max(20px, env(safe-area-inset-right));
+  bottom: max(24px, calc(env(safe-area-inset-bottom) + 18px));
   width: 72px;
   height: 72px;
   font-size: 11px;
@@ -278,8 +298,8 @@ button.primary:hover {
 }
 
 .touch-btn-z {
-  right: max(92px, calc(env(safe-area-inset-right) + 80px));
-  bottom: max(80px, calc(env(safe-area-inset-bottom) + 70px));
+  right: max(25px, calc(env(safe-area-inset-right) + 5px));
+  bottom: max(104px, calc(env(safe-area-inset-bottom) + 98px));
   width: 62px;
   height: 62px;
   font-size: 10px;
@@ -287,16 +307,16 @@ button.primary:hover {
 }
 
 .touch-btn-c {
-  right: max(10px, env(safe-area-inset-right));
-  bottom: max(112px, calc(env(safe-area-inset-bottom) + 102px));
+  right: max(29px, calc(env(safe-area-inset-right) + 9px));
+  bottom: max(174px, calc(env(safe-area-inset-bottom) + 168px));
   width: 54px;
   height: 54px;
   font-size: 10px;
 }
 
 .touch-btn-switch {
-  right: max(116px, calc(env(safe-area-inset-right) + 104px));
-  bottom: max(158px, calc(env(safe-area-inset-bottom) + 148px));
+  right: max(33px, calc(env(safe-area-inset-right) + 13px));
+  bottom: max(236px, calc(env(safe-area-inset-bottom) + 230px));
   width: 46px;
   height: 46px;
   font-size: 11px;
@@ -311,12 +331,45 @@ button.primary:hover {
   border-radius: 8px;
 }
 
-/* 縦幅が小さい端末ではボタン一式を少し小さくして収まりを良くする */
+/* #stage (position:relative) の直下にあるため、#touch-controls とは
+   別に fixed 指定して画面 (ビューポート) を基準に配置する。
+   タイトル/ポーズ画面などでも隠れず常時使えるようにするための配置 */
+.touch-fullscreen {
+  position: fixed;
+  display: none;
+  top: max(10px, env(safe-area-inset-top));
+  left: max(10px, env(safe-area-inset-left));
+  width: 38px;
+  height: 38px;
+  font-size: 17px;
+  border-radius: 8px;
+  z-index: 6;
+}
+
+@media (pointer: coarse) {
+  .touch-fullscreen {
+    display: flex;
+  }
+}
+
+/* 縦幅が小さい端末ではボタン一式を少し小さく、間隔も詰めて収まりを良くする */
 @media (max-height: 420px) {
-  .touch-btn-x { width: 62px; height: 62px; }
-  .touch-btn-z { width: 54px; height: 54px; bottom: max(70px, calc(env(safe-area-inset-bottom) + 62px)); }
-  .touch-btn-c { width: 46px; height: 46px; bottom: max(96px, calc(env(safe-area-inset-bottom) + 88px)); }
-  .touch-btn-switch { width: 40px; height: 40px; bottom: max(134px, calc(env(safe-area-inset-bottom) + 126px)); }
+  .touch-btn-x { width: 60px; height: 60px; bottom: max(20px, calc(env(safe-area-inset-bottom) + 16px)); }
+  .touch-btn-z {
+    width: 52px; height: 52px; font-size: 9px;
+    right: max(24px, calc(env(safe-area-inset-right) + 4px));
+    bottom: max(86px, calc(env(safe-area-inset-bottom) + 82px));
+  }
+  .touch-btn-c {
+    width: 46px; height: 46px; font-size: 9px;
+    right: max(27px, calc(env(safe-area-inset-right) + 7px));
+    bottom: max(144px, calc(env(safe-area-inset-bottom) + 138px));
+  }
+  .touch-btn-switch {
+    width: 40px; height: 40px; font-size: 10px;
+    right: max(30px, calc(env(safe-area-inset-right) + 10px));
+    bottom: max(196px, calc(env(safe-area-inset-bottom) + 190px));
+  }
 }
 
 /* 縦向き推奨バナー (操作は妨げない) */
