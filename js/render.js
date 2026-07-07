@@ -502,7 +502,7 @@ class Renderer {
       : volleyHint
       ? volleyHint
       : gkHolding
-      ? "矢印: 移動   Z: ロングキック   X: 近くの味方へパス"
+      ? "矢印: 移動   Z: 近くの味方へパス   X: ロングキック"
       : userRestart
       ? "矢印: 向き変更   Z: パス (リスタートはパスのみ)"
       : !game.userDefending()

@@ -38,13 +38,13 @@ window.addEventListener("DOMContentLoaded", () => {
   const touchBtnX = document.getElementById("touch-btn-x");
 
   // 味方 GK がボールを保持している間だけ、Z/X ボタンの表示を
-  // 「ロング/ショート」キックに切替える (それ以外は常にパス・シュート/スラ表記)
+  // 「ショート/ロング」キックに切替える (それ以外は常にパス・シュート/スラ表記)
   function updateTouchLabels() {
     if (!touchBtnZ || !touchBtnX || !game) return;
     const gkHolding = game.ball.owner === game.controlled &&
       game.controlled && game.controlled.isGK;
-    touchBtnZ.textContent = gkHolding ? "ロング" : "パス/スラ";
-    touchBtnX.textContent = gkHolding ? "ショート" : "シュート/スラ";
+    touchBtnZ.textContent = gkHolding ? "ショート" : "パス/スラ";
+    touchBtnX.textContent = gkHolding ? "ロング" : "シュート/スラ";
   }
 
   let game = null;

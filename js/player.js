@@ -288,6 +288,23 @@ class Player {
   // 味方がボールを持っているとき: フォーメーション位置を保ちつつ前へ
   aiSupport(game, dt) {
     const diff = game.diffFor(this.team);
+    const dir = this.team.attackDir;
+
+    // 自陣を出て攻め込んでいるときは、DF以外から1人だけクロス役として
+    // 相手ゴールライン際のサイドへ上がらせる (全員がゴール前に集まらないように)
+    const ballAdvanced = game.ball.pos.x * dir > 5;
+    if (ballAdvanced && this === game.pickCrossRunner(this.team)) {
+      const side = Math.sign(this.pos.y) || Math.sign(game.ball.pos.y) || 1;
+      const t = {
+        x: clamp(dir * (PITCH.HALF_LEN - 8), -(PITCH.HALF_LEN - 3), PITCH.HALF_LEN - 3),
+        y: clamp(side * (PITCH.PENALTY_HALF_WIDTH + 6), -(PITCH.HALF_WID - 2), PITCH.HALF_WID - 2),
+      };
+      this.applySpacing(t, game);
+      this.moveSpeed = PLAYER_CONF.RUN_SPEED * this.speedMult * 0.9 * diff.aiSpeed;
+      this.moveTarget = t;
+      return;
+    }
+
     const t = this.formationTarget(game, 7);
     // FW はゴール方向へ裏抜けを狙う
     if (this.role === "FW") {

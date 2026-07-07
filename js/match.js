@@ -279,9 +279,12 @@ class Game {
     const ownGoal = { x: -dir * PITCH.HALF_LEN, y: 0 };
     const dBall = dist(p.pos, ballPos);
     const lineDist = pointSegDist(p.pos, ballPos, ownGoal);
-    // + ならボールより敵陣側 (前)。守備に回れないのでペナルティを科す
+    // + ならボールより敵陣側 (前)。守備に回れないので大きな固定ペナルティ +
+    // 距離に比例した追加ペナルティを科し、単純な距離の近さで選ばれないようにする
     const aheadOfBall = (p.pos.x - ballPos.x) * dir;
-    const aheadPenalty = Math.max(0, aheadOfBall) * SWITCH_CONF.AHEAD_PENALTY;
+    const aheadPenalty = aheadOfBall > 0
+      ? SWITCH_CONF.AHEAD_BASE_PENALTY + aheadOfBall * SWITCH_CONF.AHEAD_PENALTY
+      : 0;
     return dBall + lineDist * 0.8 + aheadPenalty;
   }
 
@@ -312,13 +315,9 @@ class Game {
     }
 
     if (hasBall && p.isGK) {
-      // ---- 味方GKが保持: Z = ロングキック / X = 近くの味方へショートパス ----
+      // ---- 味方GKが保持: Z = 近くの味方へショートパス / X = ロングキック ----
       // (ゴールキックのリスタートもここで処理するため restartPassOnly より先に判定)
       if (input.wasPressed("KeyZ")) {
-        this.gkLongKick(p, ax);
-        return;
-      }
-      if (input.wasPressed("KeyX")) {
         const target = this.pickNearestTeammate(p, ax);
         if (target) {
           this.pass(p, target);
@@ -327,6 +326,9 @@ class Game {
         } else {
           this.gkLongKick(p, ax);   // 近くに味方が居なければロングキックで逃がす
         }
+      }
+      if (input.wasPressed("KeyX")) {
+        this.gkLongKick(p, ax);
       }
       return;
     }
@@ -493,6 +495,21 @@ class Game {
     if (best) return { x: best.pos.x, y: best.pos.y };
     const goalX = PITCH.HALF_LEN * p.team.attackDir;
     return { x: goalX - p.team.attackDir * 9, y: 0 };   // 味方が居なければ6ヤード付近中央
+  }
+
+  // クロス役 (相手ゴールライン際のサイドへ上がる味方) を1人選ぶ。
+  // DF とボール保持者は除外し、ボールに近いサイド (同じ y の符号) を優先する
+  pickCrossRunner(team) {
+    const owner = this.ball.owner;
+    const ballSide = Math.sign(this.ball.pos.y) || 1;
+    let best = null, bestScore = -Infinity;
+    for (const p of team.outfield()) {
+      if (p === owner || p.role === "DF") continue;
+      const sameSide = Math.sign(p.pos.y) === ballSide ? 1 : 0;
+      const score = sameSide * 30 - Math.abs(Math.abs(p.pos.y) - PITCH.HALF_WID * 0.6);
+      if (score > bestScore) { bestScore = score; best = p; }
+    }
+    return best;
   }
 
   // GK のショートパス相手を選ぶ: 純粋に「近さ」優先 (通常パスの中距離優先とは別基準)
