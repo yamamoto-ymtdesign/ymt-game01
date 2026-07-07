@@ -483,8 +483,8 @@ class Renderer {
       : userRestart
       ? "矢印: 向き変更   Z: パス (リスタートはパスのみ)"
       : !game.userDefending()
-      ? "矢印: ドリブル   Z: パス   X(長押し): シュート   C/Shift: ダッシュ"
-      : "矢印: 移動   Z/X: スライディング   C/Shift: ダッシュ   Space: 選手切替";
+      ? "矢印: ドリブル   Z: パス   X(長押し): シュート"
+      : "矢印: 移動   Z/X: スライディング   Space: 選手切替";
     ctx.fillStyle = "rgba(0,0,0,0.55)";
     this.roundRect(ctx, 10, this.canvas.height - 34, 620, 24, 6);
     ctx.fill();

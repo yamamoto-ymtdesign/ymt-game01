@@ -15,8 +15,7 @@
 
 const HANDLED_KEYS = new Set([
   "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
-  "Space", "KeyZ", "KeyX", "KeyC",
-  "ShiftLeft", "ShiftRight", "Enter", "Escape",
+  "Space", "KeyZ", "KeyX", "Enter", "Escape",
 ]);
 
 class Input {

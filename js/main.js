@@ -33,6 +33,18 @@ window.addEventListener("DOMContentLoaded", () => {
   const resultText = document.getElementById("result-text");
   const resultScore = document.getElementById("result-score");
   const touchControls = document.getElementById("touch-controls");
+  const touchBtnZ = document.getElementById("touch-btn-z");
+  const touchBtnX = document.getElementById("touch-btn-x");
+
+  // 味方 GK がボールを保持している間だけ、Z/X ボタンの表示を
+  // 「ロング/ショート」キックに切替える (それ以外は常にパス・シュート/スラ表記)
+  function updateTouchLabels() {
+    if (!touchBtnZ || !touchBtnX || !game) return;
+    const gkHolding = game.ball.owner === game.controlled &&
+      game.controlled && game.controlled.isGK;
+    touchBtnZ.textContent = gkHolding ? "ロング" : "パス/スラ";
+    touchBtnX.textContent = gkHolding ? "ショート" : "シュート/スラ";
+  }
 
   let game = null;
   let paused = false;
@@ -152,6 +164,7 @@ window.addEventListener("DOMContentLoaded", () => {
         }
       }
       camera.update(dt, game);
+      updateTouchLabels();
     } else if (input.wasPressed("Enter")) {
       startMatch();
     }

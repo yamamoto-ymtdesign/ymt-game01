@@ -50,9 +50,7 @@
           <tr><td>矢印キー</td><td>ドリブル</td><td>移動</td></tr>
           <tr><td>Z</td><td>パス</td><td>スライディング</td></tr>
           <tr><td>X</td><td>シュート (長押しで強く)</td><td>スライディング</td></tr>
-          <tr><td>C</td><td colspan="2">ダッシュ (共通)</td></tr>
           <tr><td>Space</td><td>-</td><td>操作選手の切替</td></tr>
-          <tr><td>Shift</td><td colspan="2">ダッシュ (共通)</td></tr>
           <tr><td>Esc</td><td colspan="2">ポーズ</td></tr>
         </table>
         <p class="help-note">
@@ -94,9 +92,8 @@
       </div>
       <div id="touch-buttons" aria-hidden="true">
         <button class="touch-btn touch-btn-switch" data-code="Space">切替</button>
-        <button class="touch-btn touch-btn-c" data-code="KeyC">ダッシュ</button>
-        <button class="touch-btn touch-btn-z" data-code="KeyZ"><span>パス</span><span>滑り込み</span></button>
-        <button class="touch-btn touch-btn-x" data-code="KeyX"><span>シュート</span><span>滑り込み</span></button>
+        <button id="touch-btn-z" class="touch-btn touch-btn-z" data-code="KeyZ">パス/スラ</button>
+        <button id="touch-btn-x" class="touch-btn touch-btn-x" data-code="KeyX">シュート/スラ</button>
       </div>
     </div>
 

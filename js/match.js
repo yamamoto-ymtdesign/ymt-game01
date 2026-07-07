@@ -193,8 +193,7 @@ class Game {
   // 手動切替は含めない。自動切替の抑制判定にのみ使う)
   hasUserInput(input) {
     return input.axis() !== null ||
-      input.isDown("KeyZ") || input.isDown("KeyX") || input.isDown("KeyC") ||
-      input.isDown("ShiftLeft") || input.isDown("ShiftRight");
+      input.isDown("KeyZ") || input.isDown("KeyX");
   }
 
   updateSwitching(input) {
@@ -286,13 +285,8 @@ class Game {
 
     const ax = input.axis();
     const charging = this.shootCharge >= 0;
-    // C は攻守共通でダッシュ
-    const dash = input.isDown("ShiftLeft") || input.isDown("ShiftRight") ||
-                 input.isDown("KeyC");
 
-    let speed;
-    if (hasBall) speed = dash ? PLAYER_CONF.DASH_DRIBBLE_SPEED : PLAYER_CONF.DRIBBLE_SPEED;
-    else speed = dash ? PLAYER_CONF.DASH_SPEED : PLAYER_CONF.RUN_SPEED;
+    let speed = (hasBall ? PLAYER_CONF.DRIBBLE_SPEED : PLAYER_CONF.RUN_SPEED) * p.speedMult;
     if (charging) speed *= 0.4;   // シュートを溜めている間は減速
 
     if (ax) {

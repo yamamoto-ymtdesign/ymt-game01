@@ -215,7 +215,6 @@ button.primary:hover {
 .touch-btn {
   position: absolute;
   display: flex;
-  flex-direction: column;   /* 2行ラベル (パス/滑り込み 等) を縦に積む */
   align-items: center;
   justify-content: center;
   border-radius: 50%;
@@ -232,11 +231,6 @@ button.primary:hover {
   user-select: none;
   pointer-events: auto;
   touch-action: none;
-}
-
-.touch-btn span {
-  display: block;
-  white-space: nowrap;
 }
 
 .touch-btn:active,
@@ -290,33 +284,25 @@ button.primary:hover {
 .touch-btn-x {
   right: max(20px, env(safe-area-inset-right));
   bottom: max(24px, calc(env(safe-area-inset-bottom) + 18px));
-  width: 72px;
-  height: 72px;
-  font-size: 11px;
+  width: 82px;
+  height: 82px;
+  font-size: 12px;
   line-height: 1.15;
   border-color: #ffe14d;
 }
 
 .touch-btn-z {
   right: max(25px, calc(env(safe-area-inset-right) + 5px));
-  bottom: max(104px, calc(env(safe-area-inset-bottom) + 98px));
-  width: 62px;
-  height: 62px;
-  font-size: 10px;
+  bottom: max(114px, calc(env(safe-area-inset-bottom) + 108px));
+  width: 72px;
+  height: 72px;
+  font-size: 11px;
   line-height: 1.15;
 }
 
-.touch-btn-c {
-  right: max(29px, calc(env(safe-area-inset-right) + 9px));
-  bottom: max(174px, calc(env(safe-area-inset-bottom) + 168px));
-  width: 54px;
-  height: 54px;
-  font-size: 10px;
-}
-
 .touch-btn-switch {
-  right: max(33px, calc(env(safe-area-inset-right) + 13px));
-  bottom: max(236px, calc(env(safe-area-inset-bottom) + 230px));
+  right: max(38px, calc(env(safe-area-inset-right) + 18px));
+  bottom: max(194px, calc(env(safe-area-inset-bottom) + 188px));
   width: 46px;
   height: 46px;
   font-size: 11px;
@@ -354,21 +340,16 @@ button.primary:hover {
 
 /* 縦幅が小さい端末ではボタン一式を少し小さく、間隔も詰めて収まりを良くする */
 @media (max-height: 420px) {
-  .touch-btn-x { width: 60px; height: 60px; bottom: max(20px, calc(env(safe-area-inset-bottom) + 16px)); }
+  .touch-btn-x { width: 70px; height: 70px; bottom: max(20px, calc(env(safe-area-inset-bottom) + 16px)); }
   .touch-btn-z {
-    width: 52px; height: 52px; font-size: 9px;
+    width: 62px; height: 62px; font-size: 10px;
     right: max(24px, calc(env(safe-area-inset-right) + 4px));
-    bottom: max(86px, calc(env(safe-area-inset-bottom) + 82px));
-  }
-  .touch-btn-c {
-    width: 46px; height: 46px; font-size: 9px;
-    right: max(27px, calc(env(safe-area-inset-right) + 7px));
-    bottom: max(144px, calc(env(safe-area-inset-bottom) + 138px));
+    bottom: max(96px, calc(env(safe-area-inset-bottom) + 92px));
   }
   .touch-btn-switch {
     width: 40px; height: 40px; font-size: 10px;
-    right: max(30px, calc(env(safe-area-inset-right) + 10px));
-    bottom: max(196px, calc(env(safe-area-inset-bottom) + 190px));
+    right: max(35px, calc(env(safe-area-inset-right) + 15px));
+    bottom: max(164px, calc(env(safe-area-inset-bottom) + 158px));
   }
 }
 

@@ -21,6 +21,8 @@ class Player {
     this.role = slot.role;
     this.isGK = slot.role === "GK";
     this.num = num;
+    // 選手ごとの速度個体差 (チーム内でランダムに 0.8〜1.2 倍)
+    this.speedMult = rand(PLAYER_CONF.SPEED_VARIANCE_MIN, PLAYER_CONF.SPEED_VARIANCE_MAX);
 
     this.pos = { x: 0, y: 0 };
     this.vel = { x: 0, y: 0 };
@@ -268,7 +270,7 @@ class Player {
     }
 
     if (this.plan && this.plan.type === "dribble") {
-      this.moveSpeed = PLAYER_CONF.DRIBBLE_SPEED * diff.aiSpeed;
+      this.moveSpeed = PLAYER_CONF.DRIBBLE_SPEED * this.speedMult * diff.aiSpeed;
       this.moveTarget = {
         x: this.pos.x + this.plan.dir.x * 8,
         y: this.pos.y + this.plan.dir.y * 8,
@@ -285,7 +287,7 @@ class Player {
       t.x = clamp(t.x + this.team.attackDir * 6, -(PITCH.HALF_LEN - 3), PITCH.HALF_LEN - 3);
     }
     this.applySpacing(t, game);
-    this.moveSpeed = PLAYER_CONF.RUN_SPEED * 0.88 * diff.aiSpeed;
+    this.moveSpeed = PLAYER_CONF.RUN_SPEED * this.speedMult * 0.88 * diff.aiSpeed;
     this.moveTarget = t;
   }
 
@@ -299,7 +301,7 @@ class Player {
         ? { x: ball.owner.pos.x, y: ball.owner.pos.y }
         : { x: ball.pos.x + ball.vel.x * 0.3, y: ball.pos.y + ball.vel.y * 0.3 };
       // チェイサーはブーストして追走し、ドリブルで振り切られないようにする
-      this.moveSpeed = PLAYER_CONF.RUN_SPEED * PLAYER_CONF.CHASE_BOOST * diff.aiSpeed;
+      this.moveSpeed = PLAYER_CONF.RUN_SPEED * this.speedMult * PLAYER_CONF.CHASE_BOOST * diff.aiSpeed;
       this.moveTarget = target;
 
       // 近づいたら確率的にタックルを仕掛ける
@@ -311,7 +313,7 @@ class Player {
     } else {
       const t = this.formationTarget(game, -7);
       this.applySpacing(t, game);
-      this.moveSpeed = PLAYER_CONF.RUN_SPEED * 0.85 * diff.aiSpeed;
+      this.moveSpeed = PLAYER_CONF.RUN_SPEED * this.speedMult * 0.85 * diff.aiSpeed;
       this.moveTarget = t;
     }
   }
@@ -337,12 +339,12 @@ class Player {
       (!ball.owner || ball.owner.team !== this.team);
     if (dangerous) {
       // 飛び出してボールへ
-      this.moveSpeed = PLAYER_CONF.GK_SPEED;
+      this.moveSpeed = PLAYER_CONF.GK_SPEED * this.speedMult;
       this.moveTarget = { x: ball.pos.x, y: ball.pos.y };
     } else {
       // ゴールライン少し前でボールの高さに合わせて構える
       const ty = clamp(ball.pos.y * 0.35, -(PITCH.GOAL_HALF - 0.4), PITCH.GOAL_HALF - 0.4);
-      this.moveSpeed = PLAYER_CONF.GK_SPEED;
+      this.moveSpeed = PLAYER_CONF.GK_SPEED * this.speedMult;
       this.moveTarget = { x: goalX + dir * 1.4, y: ty };
     }
   }
