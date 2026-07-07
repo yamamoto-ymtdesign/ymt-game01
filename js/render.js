@@ -410,6 +410,13 @@ class Renderer {
         ctx.fillRect(x - gw / 2, y - h - 30, gw, gh);
         ctx.fillStyle = game.shootCharge < 0.7 ? "#7ee36a" : "#ff8b3d";
         ctx.fillRect(x - gw / 2 + 1, y - h - 29, (gw - 2) * game.shootCharge, gh - 2);
+      } else if (game.crossCharge >= 0) {
+        const gw = 44, gh = 7;
+        const ratio = clamp(game.crossCharge / CROSS_CONF.HOLD_TIME, 0, 1);
+        ctx.fillStyle = "rgba(0,0,0,0.55)";
+        ctx.fillRect(x - gw / 2, y - h - 30, gw, gh);
+        ctx.fillStyle = "#4fc3f7";
+        ctx.fillRect(x - gw / 2 + 1, y - h - 29, (gw - 2) * ratio, gh - 2);
       }
     }
   }
@@ -463,31 +470,45 @@ class Renderer {
     ctx.fillStyle = game.cpuTeam.colors.main;
     ctx.fillText(game.cpuTeam.name, W / 2 + 110, 27);
     ctx.fillStyle = "#fff";
+    const inPK = game.state === "pk" || game.state === "pk_done";
     ctx.fillText(game.score[0] + " - " + game.score[1], W / 2 - 40, 27);
     ctx.fillStyle = "#ffe14d";
     ctx.font = "bold 15px sans-serif";
-    const halfLabel = game.half === 1 ? "前半" : "後半";
-    ctx.fillText(halfLabel + " " + fmtTime(game.displayTime()), W / 2 + 38, 27);
+    if (inPK && game.pk) {
+      ctx.fillText("PK " + game.pk.userScore + " - " + game.pk.cpuScore, W / 2 + 42, 27);
+    } else {
+      const halfLabel = game.half === 1 ? "前半" : "後半";
+      ctx.fillText(halfLabel + " " + fmtTime(game.displayTime()), W / 2 + 38, 27);
+    }
 
     // 操作ガイド (攻守フェーズに応じて切替)
     const gkHolding = game.ball.owner === game.controlled &&
       game.controlled && game.controlled.isGK;
     const userRestart = !gkHolding && game.restartPassOnly &&
       game.ball.owner === game.controlled;
+    const inCrossZone = game.controlled && game.ball.owner === game.controlled &&
+      game.isCrossZone(game.controlled);
+    const headerMode = game.ball.airborne;
     const volleyHint = game.volley && (game.volley.active || game.volley.passActive)
       ? "★ " + [
-          game.volley.active ? "X: ダイレクトシュート!!" : null,
+          game.volley.active ? ("X: " + (headerMode ? "ヘディングシュート!!" : "ダイレクトシュート!!")) : null,
           game.volley.passActive ? "Z: ワンタッチパス!!" : null,
         ].filter(Boolean).join("   ")
       : null;
-    const guide = volleyHint
+    const guide = inPK
+      ? (game.pk && game.pk.phase === "shoot" && game.pk.kickerIsUser
+          ? "矢印: 助走の左右調整   X(長押し): シュート"
+          : "相手のキックを見守ろう…")
+      : volleyHint
       ? volleyHint
       : gkHolding
       ? "矢印: 移動   Z: ロングキック   X: 近くの味方へパス"
       : userRestart
       ? "矢印: 向き変更   Z: パス (リスタートはパスのみ)"
       : !game.userDefending()
-      ? "矢印: ドリブル   Z: パス   X(長押し): シュート"
+      ? (inCrossZone
+          ? "矢印: ドリブル   Z長押し: クロス   X(長押し): シュート"
+          : "矢印: ドリブル   Z: パス   X(長押し): シュート")
       : "矢印: 移動   Z/X: スライディング   Space: 選手切替";
     ctx.fillStyle = "rgba(0,0,0,0.55)";
     this.roundRect(ctx, 10, this.canvas.height - 34, 620, 24, 6);

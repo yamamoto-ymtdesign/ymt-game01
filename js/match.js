@@ -41,11 +41,13 @@ class Game {
     this.controlled = null;     // ユーザーが操作中の選手
     this.switchLock = 0;        // 自動切替のロック残り時間
     this.shootCharge = -1;      // シュート溜め (0〜1 / -1 = 溜めていない)
+    this.crossCharge = -1;      // クロス長押し (0〜HOLD_TIME / -1 = 長押ししていない)
     this.pendingKickoffTeam = null;
     this.volley = null;         // ダイレクトシュートの状態 {active, failed}
     this.restartPassOnly = false; // リスタート(キックイン等)はパス以外禁止
     this.restartTaker = null;     // リスタートの出し手
     this.inputIdleFrames = 0;     // ユーザーが無入力のまま経過したフレーム数
+    this.pk = null;               // PK戦の状態 (試合が同点で終わったときだけ生成)
 
     this.setupKickoff(this.userTeam, "キックオフ");
   }
@@ -94,6 +96,7 @@ class Game {
     this.state = "freeze";
     this.freezeTimer = t;
     this.shootCharge = -1;
+    this.crossCharge = -1;
     if (text) this.showBanner(text, Math.max(t, 1.2));
   }
 
@@ -150,10 +153,20 @@ class Game {
       case "playing":
         this.time += dt;
         if (this.time >= this.halfLength) {
-          this.state = this.half === 1 ? "halftime" : "fulltime";
+          if (this.half === 1) { this.state = "halftime"; return; }
+          // 後半終了時に同点なら PK 戦へ。それ以外はそのまま試合終了
+          if (this.score[0] === this.score[1]) { this.startPK(); return; }
+          this.state = "fulltime";
           return;
         }
         this.updatePlay(dt, input);
+        break;
+      case "pk":
+        this.updatePK(dt, input);
+        break;
+      case "pk_done":
+        this.freezeTimer -= dt;
+        if (this.freezeTimer <= 0) this.state = "fulltime";
         break;
       // halftime / fulltime は UI 側 (main.js) が処理する
     }
@@ -280,11 +293,12 @@ class Game {
 
     if (p.busy) {
       if (this.shootCharge >= 0) this.shootCharge = -1;
+      if (this.crossCharge >= 0) this.crossCharge = -1;
       return;
     }
 
     const ax = input.axis();
-    const charging = this.shootCharge >= 0;
+    const charging = this.shootCharge >= 0 || this.crossCharge >= 0;
 
     let speed = (hasBall ? PLAYER_CONF.DRIBBLE_SPEED : PLAYER_CONF.RUN_SPEED) * p.speedMult;
     if (charging) speed *= 0.4;   // シュートを溜めている間は減速
@@ -338,13 +352,38 @@ class Game {
 
     if (hasBall) {
       // ---- 攻撃時: Z = パス / X = シュート (長押しで強く) ----
+      // 相手ゴールライン際のサイド (isCrossZone) では、Z の長押しで
+      // 自動的にクロス (センタリング) が上がる。タップですぐ離せば通常のパス
+      const inCrossZone = this.isCrossZone(p);
       if (input.wasPressed("KeyZ")) {
-        const dir = ax || { x: p.facing.x, y: p.facing.y };
-        const target = this.pickPassTarget(p, dir, false);
-        if (target) {
-          this.pass(p, target);
-          this.controlled = target;       // パスと同時に受け手へ操作を移す
-          this.switchLock = 0.4;
+        if (inCrossZone) {
+          this.crossCharge = 0;
+        } else {
+          const dir = ax || { x: p.facing.x, y: p.facing.y };
+          const target = this.pickPassTarget(p, dir, false);
+          if (target) {
+            this.pass(p, target);
+            this.controlled = target;       // パスと同時に受け手へ操作を移す
+            this.switchLock = 0.4;
+          }
+          return;
+        }
+      }
+      if (this.crossCharge >= 0) {
+        this.crossCharge += dt;
+        if (this.crossCharge >= CROSS_CONF.HOLD_TIME) {
+          this.cross(p);
+          this.crossCharge = -1;
+        } else if (input.wasReleased("KeyZ")) {
+          // 閾値に達する前に離したら、通常のタップパスとして扱う
+          const dir = ax || { x: p.facing.x, y: p.facing.y };
+          const target = this.pickPassTarget(p, dir, false);
+          if (target) {
+            this.pass(p, target);
+            this.controlled = target;
+            this.switchLock = 0.4;
+          }
+          this.crossCharge = -1;
         }
         return;
       }
@@ -422,6 +461,40 @@ class Game {
     gk.thinkTimer = 0.3;
   }
 
+  // ---------------- クロス (センタリング) ----------------
+
+  // 相手ゴールライン際 (ペナルティエリアの奥行きの範囲) かつペナルティ
+  // エリアの幅より外側 (サイド) にいるか
+  isCrossZone(p) {
+    const dir = p.team.attackDir;
+    const goalX = PITCH.HALF_LEN * dir;
+    const depth = Math.abs(goalX - p.pos.x);
+    return depth <= PITCH.PENALTY_DEPTH && Math.abs(p.pos.y) > PITCH.PENALTY_HALF_WIDTH;
+  }
+
+  // クロスを送る: 相手ボックス内で最もゴール中央に近い味方 (いなければ
+  // ゴール前中央) を狙って浮き球を上げる。着弾までの間は既存のワンタッチ
+  // 判定 (updateVolleyState/doVolley) がそのままヘディングシュートの
+  // 受付窓として機能する
+  cross(p) {
+    const target = this.crossTarget(p);
+    this.ball.launchCross(p, target, CROSS_CONF.SPEED);
+    p.thinkTimer = 0.3;
+  }
+
+  crossTarget(p) {
+    const oppBox = this.otherTeam(p.team);
+    let best = null, bestScore = Infinity;
+    for (const mate of p.team.outfield()) {
+      if (mate === p || !this.inPenaltyBox(mate.pos, oppBox)) continue;
+      const score = Math.abs(mate.pos.y);   // より中央寄りの選手を優先
+      if (score < bestScore) { bestScore = score; best = mate; }
+    }
+    if (best) return { x: best.pos.x, y: best.pos.y };
+    const goalX = PITCH.HALF_LEN * p.team.attackDir;
+    return { x: goalX - p.team.attackDir * 9, y: 0 };   // 味方が居なければ6ヤード付近中央
+  }
+
   // GK のショートパス相手を選ぶ: 純粋に「近さ」優先 (通常パスの中距離優先とは別基準)
   pickNearestTeammate(p, dir) {
     let best = null, bestScore = -Infinity;
@@ -491,10 +564,13 @@ class Game {
     this.volley.passActive = windowOpen && !this.volley.passFailed;
   }
 
-  // ダイレクトシュートの実行: トラップせずボールの現在位置から直接ゴールへ
+  // ダイレクトシュートの実行: トラップせずボールの現在位置から直接ゴールへ。
+  // ボールが浮き球 (クロス) なら「ヘディングシュート」として扱い、長押し
+  // 強シュートと同じフルパワーで撃つ (通常のダイレクトボレーはやや抑えめ)
   doVolley(p, ax) {
     const aimY = ax ? ax.y * 2.6 : 0;   // 通常シュートと同じく上下でコース調整
-    this.shootFrom(p, this.ball.pos, aimY, VOLLEY_CONF.POWER);
+    const power = this.ball.airborne ? 1 : VOLLEY_CONF.POWER;
+    this.shootFrom(p, this.ball.pos, aimY, power);
     p.kickAnim = 0.28;
     this.volley = null;
   }
@@ -729,5 +805,233 @@ class Game {
     this.restartPassOnly = true;
     this.restartTaker = taker;
     this.setFreeze(1.1, label);
+  }
+
+  // ---------------- PK 戦 ----------------
+  //  状態: pk.phase
+  //    setup  - キッカー/GK配置直後の静止
+  //    shoot  - キッカーが撃てる (ユーザーなら操作可、CPUなら一定時間後に自動で撃つ)
+  //    result - ゴール/失敗の演出中
+  //  PK_CONF.ROUNDS 本ずつ終えても同点ならサドンデス (1本ずつ) に突入する
+
+  // 後半終了が同点だったときに呼ばれる
+  startPK() {
+    this.pk = {
+      order: Math.random() < 0.5 ? [this.userTeam, this.cpuTeam] : [this.cpuTeam, this.userTeam],
+      kickIndex: 0,
+      userScore: 0,
+      cpuScore: 0,
+      kicksTaken: { [this.userTeam.id]: 0, [this.cpuTeam.id]: 0 },
+      sudden: false,
+    };
+    this.state = "pk";
+    this.volley = null;   // 通常プレー終了時点の状態が残らないようにする
+    this.showBanner("PK戦!", 1.6);
+    this.startPKAttempt();
+  }
+
+  // 1本ごとのキッカー/GK配置。他の選手は邪魔にならないよう中央円付近に控えさせる
+  startPKAttempt() {
+    const pk = this.pk;
+    const kicking = pk.order[pk.kickIndex % 2];
+    const defending = this.otherTeam(kicking);
+    const shooter = kicking.outfield()[pk.kicksTaken[kicking.id] % kicking.outfield().length];
+    const gk = defending.gk;
+    const goalX = PITCH.HALF_LEN * kicking.attackDir;
+    const spot = { x: goalX - kicking.attackDir * PK_CONF.SPOT_DIST, y: 0 };
+
+    for (const t of this.teams) {
+      t.players.forEach((p, i) => {
+        if (p === shooter || p === gk) return;
+        p.pos = { x: t.isUser ? -3 : 3, y: (i - 4) * 3.4 };
+        p.vel = { x: 0, y: 0 };
+        p.state = "normal";
+        p.stateTimer = 0;
+        p.moveTarget = null;
+      });
+    }
+
+    shooter.pos = { x: spot.x, y: spot.y };
+    shooter.vel = { x: 0, y: 0 };
+    shooter.facing = { x: kicking.attackDir, y: 0 };
+    shooter.state = "normal";
+    shooter.stateTimer = 0;
+    gk.pos = { x: kicking.attackDir * (PITCH.HALF_LEN - 0.3), y: 0 };
+    gk.vel = { x: 0, y: 0 };
+    gk.state = "normal";
+    gk.stateTimer = 0;
+    gk.holdTimer = 0;
+
+    this.ball.reset(spot);
+    this.givePossession(shooter);
+    this.controlled = kicking.isUser ? shooter : gk;   // CPU 側の番は GK にフォーカスするだけ
+    this.shootCharge = -1;
+    this.crossCharge = -1;
+
+    pk.shooter = shooter;
+    pk.gk = gk;
+    pk.kickerIsUser = kicking.isUser;
+    pk.cpuKicked = false;
+    pk.cpuKickAt = rand(0.6, 1.2);
+    pk.shotFired = false;
+    pk.settleTimer = 0;
+    pk.timeout = PK_CONF.TIMEOUT;
+    pk.preShotTimeout = PK_CONF.TIMEOUT;   // 撃たないまま経過したら強制的に蹴る
+    pk.phase = "setup";
+    pk.timer = PK_CONF.SETUP_TIME;
+
+    const roundLabel = pk.sudden ? "サドンデス" : "PK " + (Math.floor(pk.kickIndex / 2) + 1) + "本目";
+    this.showBanner(kicking.name + " の " + roundLabel, 1.2);
+  }
+
+  updatePK(dt, input) {
+    const pk = this.pk;
+
+    if (pk.phase === "setup") {
+      pk.timer -= dt;
+      if (pk.timer <= 0) pk.phase = "shoot";
+      return;
+    }
+
+    if (pk.phase === "shoot") {
+      pk.gk.updateAI(this, dt);
+      pk.gk.update(this, dt);
+
+      if (pk.kickerIsUser) {
+        this.updatePKShooter(pk.shooter, input, dt);
+      } else if (!pk.cpuKicked) {
+        pk.cpuKickAt -= dt;
+        if (pk.cpuKickAt <= 0) {
+          const aimY = rand(-1, 1) * (PITCH.GOAL_HALF - 0.6);
+          this.shoot(pk.shooter, aimY, rand(0.7, 1.0));
+          pk.cpuKicked = true;
+        }
+      }
+      pk.shooter.update(this, dt);
+
+      this.ball.update(dt);
+      if (!this.ball.owner) this.tryPickups();
+      this.checkPKOutcome(dt);
+      return;
+    }
+
+    if (pk.phase === "result") {
+      pk.timer -= dt;
+      if (pk.timer <= 0) {
+        if (this.pkDecided()) this.finishPK();
+        else this.startPKAttempt();
+      }
+    }
+  }
+
+  // PK のキッカー操作: 助走 (狭い範囲) + X 長押しでシュート。Z によるパスは禁止
+  updatePKShooter(p, input, dt) {
+    if (p.busy) {
+      if (this.shootCharge >= 0) this.shootCharge = -1;
+      return;
+    }
+    const ax = input.axis();
+    const charging = this.shootCharge >= 0;
+    let speed = PLAYER_CONF.DRIBBLE_SPEED * p.speedMult;
+    if (charging) speed *= 0.4;
+
+    if (ax) {
+      p.moveTarget = { x: p.pos.x + ax.x * 4, y: p.pos.y + ax.y * 4 };
+      p.moveSpeed = speed;
+      p.facing = { x: ax.x, y: ax.y };
+    } else {
+      p.moveTarget = null;
+    }
+
+    if (this.ball.owner !== p) return;   // 蹴った後は何もしない
+
+    if (input.wasPressed("KeyX")) this.shootCharge = 0;
+    if (this.shootCharge >= 0) {
+      this.shootCharge = Math.min(1, this.shootCharge + dt / ACTION_CONF.SHOOT_CHARGE_TIME);
+      if (input.wasReleased("KeyX") || this.shootCharge >= 1) {
+        const aimY = ax ? ax.y * 2.6 : 0;
+        this.shoot(p, aimY, this.shootCharge);
+        this.shootCharge = -1;
+      }
+    }
+  }
+
+  // ゴール / キャッチ / 外れ (静止 or タイムアウト) を判定する
+  checkPKOutcome(dt) {
+    const pk = this.pk, b = this.ball;
+    if (b.owner !== pk.shooter) pk.shotFired = true;   // 蹴った/キャッチされた瞬間
+
+    if (!pk.shotFired) {
+      // 蹴らないまま固まってしまわないよう、時間切れなら弱く正面へ蹴らせる
+      pk.preShotTimeout -= dt;
+      if (pk.preShotTimeout <= 0) {
+        this.shoot(pk.shooter, 0, 0.3);
+        pk.shotFired = true;
+      }
+      return;
+    }
+
+    if (Math.abs(b.pos.x) > PITCH.HALF_LEN + 0.2) {
+      const scored = Math.abs(b.pos.y) <= PITCH.GOAL_HALF;
+      this.resolvePKAttempt(scored);
+      return;
+    }
+    if (b.owner === pk.gk) { this.resolvePKAttempt(false); return; }
+
+    pk.timeout -= dt;
+    if (!b.owner && !b.airborne && vlen(b.vel) < 0.4) {
+      pk.settleTimer += dt;
+      if (pk.settleTimer > 0.5) { this.resolvePKAttempt(false); return; }
+    } else {
+      pk.settleTimer = 0;
+    }
+    if (pk.timeout <= 0) this.resolvePKAttempt(false);
+  }
+
+  resolvePKAttempt(scored) {
+    const pk = this.pk;
+    const kicking = pk.order[pk.kickIndex % 2];
+    if (scored) {
+      if (kicking === this.userTeam) pk.userScore++;
+      else pk.cpuScore++;
+    }
+    pk.kicksTaken[kicking.id]++;
+    pk.kickIndex++;
+    this.showBanner(scored ? "ゴール!" : "はずれ…", 1.2);
+    this.shootCharge = -1;
+    pk.phase = "result";
+    pk.timer = PK_CONF.RESULT_TIME;
+  }
+
+  // 決着がついたか判定する。通常本数消化前でも残り本数で逆転不可能なら
+  // 打ち切り、通常本数を終えて同点ならサドンデスに切り替える (副作用あり)
+  pkDecided() {
+    const pk = this.pk;
+    if (!pk.sudden) {
+      const takenUser = pk.kicksTaken[this.userTeam.id];
+      const takenCpu = pk.kicksTaken[this.cpuTeam.id];
+      const remainingUser = Math.max(0, PK_CONF.ROUNDS - takenUser);
+      const remainingCpu = Math.max(0, PK_CONF.ROUNDS - takenCpu);
+      if (pk.userScore > pk.cpuScore + remainingCpu) return true;
+      if (pk.cpuScore > pk.userScore + remainingUser) return true;
+      if (takenUser < PK_CONF.ROUNDS || takenCpu < PK_CONF.ROUNDS) return false;
+      if (pk.userScore === pk.cpuScore) { pk.sudden = true; return false; }
+      return true;
+    }
+    // サドンデス: 両者が同じ本数を消化した直後、差がついていれば終了
+    const extraUser = pk.kicksTaken[this.userTeam.id] - PK_CONF.ROUNDS;
+    const extraCpu = pk.kicksTaken[this.cpuTeam.id] - PK_CONF.ROUNDS;
+    if (extraUser === extraCpu && extraUser > 0) {
+      return pk.userScore !== pk.cpuScore;
+    }
+    return false;
+  }
+
+  finishPK() {
+    const pk = this.pk;
+    const userWon = pk.userScore > pk.cpuScore;
+    this.showBanner((userWon ? this.userTeam.name : this.cpuTeam.name) + " PK勝利!", 2.2);
+    this.state = "pk_done";
+    this.freezeTimer = 2.2;
   }
 }

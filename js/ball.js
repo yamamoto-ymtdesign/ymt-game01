@@ -68,6 +68,19 @@ class Ball {
     this.landingSide = landingSide;
   }
 
+  // クロス (センタリング): 狙った地点までの飛行時間ぶんだけ浮かせて送る。
+  // GK のロングキックと違って距離ベースで着地させたいので landingSide は
+  // 使わず (0 のまま)、Ball.update() 側は airborneTimer の経過だけで着地させる
+  launchCross(player, targetPos, speed) {
+    const dir = normTo(player.pos, targetPos);
+    this.kick(player, dir, speed);
+    this.airborne = true;
+    const t = clamp(dist(player.pos, targetPos) / speed, 0.35, BALL_CONF.LOFT_MAX_TIME);
+    this.airborneTimer = t;
+    this.airborneTotal = t;
+    this.landingSide = 0;
+  }
+
   // 現在の見かけの浮き上がり高さ (描画用。地上なら 0)
   loftHeight() {
     if (!this.airborne || this.airborneTotal <= 0) return 0;

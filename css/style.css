@@ -102,6 +102,12 @@ h2 {
   color: #aab;
 }
 
+.stats-line {
+  color: #ffe14d;
+  font-size: 13px;
+  margin-top: -8px;
+}
+
 .settings {
   display: flex;
   gap: 28px;

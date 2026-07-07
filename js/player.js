@@ -249,6 +249,11 @@ class Player {
       const dGoal = dist(this.pos, goal);
       const pressure = game.nearestOpponentDist(this);
 
+      // クロスゾーン (相手ゴールライン際のサイド) に居るならクロスを優先する
+      if (game.isCrossZone(this)) {
+        game.cross(this);
+        return;
+      }
       // シュート: ゴールに近く角度もあるなら狙う
       if (dGoal < 21 && Math.abs(this.pos.y) < 16 &&
           Math.random() < 0.35 + (21 - dGoal) * 0.05) {
@@ -325,6 +330,14 @@ class Player {
     const ball = game.ball;
     const dir = this.team.attackDir;
     const goalX = -dir * PITCH.HALF_LEN;
+
+    // PK戦: 飛び出さずゴールライン上に留まり、ボールの左右位置だけを追う
+    if (game.pk && game.pk.gk === this) {
+      this.moveSpeed = PLAYER_CONF.GK_SPEED * this.speedMult;
+      const ty = clamp(ball.pos.y * 0.6, -(PITCH.GOAL_HALF - 0.3), PITCH.GOAL_HALF - 0.3);
+      this.moveTarget = { x: goalX + dir * 1.2, y: ty };
+      return;
+    }
 
     // キャッチ後: 少し保持してから味方へフィードする
     if (ball.owner === this) {

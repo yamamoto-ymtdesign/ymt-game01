@@ -30,6 +30,7 @@ window.addEventListener("DOMContentLoaded", () => {
   };
   const selHalf = document.getElementById("sel-half");
   const selDiff = document.getElementById("sel-diff");
+  const statsLine = document.getElementById("stats-line");
   const resultText = document.getElementById("result-text");
   const resultScore = document.getElementById("result-score");
   const touchControls = document.getElementById("touch-controls");
@@ -66,7 +67,41 @@ window.addEventListener("DOMContentLoaded", () => {
     Settings.load();
     selHalf.value = String(Settings.data.halfLengthMin);
     selDiff.value = Settings.data.difficulty;
+    updateStatsLine();
     showScreen("menu");
+  }
+
+  // 通算成績をタイトル画面に表示する (試合が1度も無ければ何も表示しない)
+  function updateStatsLine() {
+    if (!statsLine) return;
+    const r = Settings.data.record;
+    const total = r.wins + r.losses + r.draws;
+    if (total === 0) {
+      statsLine.textContent = "";
+      return;
+    }
+    let text = `通算成績 ${r.wins}勝 ${r.losses}敗 ${r.draws}分`;
+    if (r.streak > 0) text += `　現在 ${r.streak}連勝`;
+    if (r.bestStreak > 1) text += ` (最高 ${r.bestStreak}連勝)`;
+    statsLine.textContent = text;
+  }
+
+  // 試合結果を通算成績に反映する (完走した試合だけが対象。途中でタイトルへ
+  // 戻った場合はここを通らないのでカウントされない)
+  function updateRecord(won, lost) {
+    const r = Settings.data.record;
+    if (won) {
+      r.wins++;
+      r.streak++;
+      r.bestStreak = Math.max(r.bestStreak, r.streak);
+    } else if (lost) {
+      r.losses++;
+      r.streak = 0;
+    } else {
+      r.draws++;
+      r.streak = 0;
+    }
+    Settings.save();
   }
 
   // タッチ操作端末では、ブラウザのアドレスバー等に画面を圧迫されないよう
@@ -110,9 +145,20 @@ window.addEventListener("DOMContentLoaded", () => {
 
   function showResult() {
     const [us, them] = game.score;
-    resultScore.textContent =
-      game.userTeam.name + "  " + us + " - " + them + "  " + game.cpuTeam.name;
-    resultText.textContent = us > them ? "勝利！" : us < them ? "敗北…" : "引き分け";
+    let resultLine = game.userTeam.name + "  " + us + " - " + them + "  " + game.cpuTeam.name;
+    let won, lost;
+    if (game.pk) {
+      resultLine += `  (PK ${game.pk.userScore}-${game.pk.cpuScore})`;
+      won = game.pk.userScore > game.pk.cpuScore;
+      lost = game.pk.cpuScore > game.pk.userScore;
+    } else {
+      won = us > them;
+      lost = us < them;
+    }
+    resultScore.textContent = resultLine;
+    resultText.textContent = won ? (game.pk ? "PK勝利！" : "勝利！")
+      : lost ? (game.pk ? "PK敗退…" : "敗北…") : "引き分け";
+    updateRecord(won, lost);
     showScreen("result");
   }
 
