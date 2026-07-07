@@ -278,6 +278,20 @@ button.primary:hover {
   transition: none;
 }
 
+/* 中心のニュートラル範囲 (js/touch.js の DEADZONE_RATIO と対応する見た目のドーナツの穴)。
+   % 指定なので画面幅ブレークポイントで .touch-stick-base が縮んでも自動的に追従する */
+.touch-stick-deadzone {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 40%;
+  height: 40%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 1.5px dashed rgba(255, 255, 255, 0.4);
+  pointer-events: none;
+}
+
 /* アクションボタン (右側の余白に縦一列で配置)。中心を右端から同じ距離に
    揃えることで、幅の異なるボタンでも一直線に積み上がって見える。
    下端に十分な余白を取ってジェスチャーナビゲーションバーも避ける */

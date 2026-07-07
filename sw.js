@@ -2,15 +2,15 @@
 
 // =====================================================================
 // Service Worker: オフラインでも遊べるように主要アセットをキャッシュする。
-// 戦略: キャッシュがあれば即返しつつ、裏でネットワークから取得して
-// キャッシュを更新する (stale-while-revalidate)。オフライン時はネット
-// 取得が失敗するので、あればキャッシュへフォールバックする。
+// 戦略: まずネットワークから取得し、成功したらキャッシュを更新してそれを
+// 返す (network-first)。オンラインなら常に最新版が表示される。オフライン
+// でネット取得が失敗したときだけキャッシュへフォールバックする。
 //
 // リリースごとにファイルを変更したら CACHE_NAME のバージョンを上げること。
 // 古いキャッシュは activate イベントで自動的に破棄される。
 // =====================================================================
 
-const CACHE_NAME = "ymt-soccer-v2";
+const CACHE_NAME = "ymt-soccer-v3";
 const ASSETS = [
   "./",
   "./index.html",
@@ -52,17 +52,14 @@ self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
 
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      const network = fetch(event.request)
-        .then((res) => {
-          if (res && res.status === 200) {
-            const copy = res.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-          }
-          return res;
-        })
-        .catch(() => cached);
-      return cached || network;
-    })
+    fetch(event.request)
+      .then((res) => {
+        if (res && res.status === 200) {
+          const copy = res.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+        }
+        return res;
+      })
+      .catch(() => caches.match(event.request))
   );
 });

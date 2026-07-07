@@ -14,22 +14,26 @@ function setupTouchControls(input) {
   const stickKnob = document.getElementById("touch-stick-knob");
   if (!stickBase || !stickKnob) return;   // 要素が無ければ何もしない
 
-  const STICK_RADIUS = 40;   // ノブが動ける半径 (px)
-  const DEADZONE = 8;        // これ未満の移動は入力なし扱い
+  // 中心付近 (見た目のドーナツの穴部分) はニュートラル扱いにする比率。
+  // ノブがこの内側に留まっている間は入力なしになるので、指が中心から
+  // 少しズレただけで意図しない方向に入ってしまうのを防げる
+  const DEADZONE_RATIO = 0.4;
 
   let stickTouchId = null;
   let stickCenter = { x: 0, y: 0 };
+  let stickRadius = 40;    // ノブが動ける半径 (px, タッチ開始時に実測)
+  let deadzone = 16;       // 中心からこの距離未満は入力なし (px, 実測ベース)
 
   function stickMove(touch) {
     let dx = touch.clientX - stickCenter.x;
     let dy = touch.clientY - stickCenter.y;
     const d = Math.hypot(dx, dy);
-    if (d > STICK_RADIUS) {
-      dx = (dx / d) * STICK_RADIUS;
-      dy = (dy / d) * STICK_RADIUS;
+    if (d > stickRadius) {
+      dx = (dx / d) * stickRadius;
+      dy = (dy / d) * stickRadius;
     }
     stickKnob.style.transform = `translate(${dx}px, ${dy}px)`;
-    input.setTouchAxis(d < DEADZONE ? null : norm(dx, dy));
+    input.setTouchAxis(d < deadzone ? null : norm(dx, dy));
   }
 
   function stickEnd() {
@@ -43,6 +47,10 @@ function setupTouchControls(input) {
     if (stickTouchId !== null) return;   // 既に別指で操作中なら無視
     const rect = stickBase.getBoundingClientRect();
     stickCenter = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    // 実際の表示サイズ (画面幅に応じたブレークポイントで変わる) に合わせて
+    // 可動範囲とニュートラル半径を求める
+    stickRadius = rect.width / 2;
+    deadzone = stickRadius * DEADZONE_RATIO;
     const touch = e.changedTouches[0];
     stickTouchId = touch.identifier;
     stickMove(touch);
