@@ -21,7 +21,9 @@ class Player {
     this.role = slot.role;
     this.isGK = slot.role === "GK";
     this.num = num;
-    // 選手ごとの速度個体差 (チーム内でランダムに 0.8〜1.2 倍)
+    // 選手ごとの速度個体差 (チーム内でランダムに 0.9〜1.1 倍)。
+    // 「その日の調子」が良い選手は Team.assignForm() でさらに上書きされる
+    this.goodForm = false;
     this.speedMult = rand(PLAYER_CONF.SPEED_VARIANCE_MIN, PLAYER_CONF.SPEED_VARIANCE_MAX);
 
     this.pos = { x: 0, y: 0 };

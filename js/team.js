@@ -13,6 +13,17 @@ class Team {
     this.colors = colors;       // { main, dark, gk }
     this.players = FORMATION_9.map((slot, i) => new Player(this, slot, i + 1));
     this.gk = this.players[0];
+    this.assignForm();
+  }
+
+  // その日の調子: チームからランダムに最大 GOOD_FORM_COUNT 人を「絶好調」にし、
+  // 通常より速い個体差レンジ (GOOD_FORM_SPEED_MIN〜MAX) を割り当てる
+  assignForm() {
+    const shuffled = this.players.slice().sort(() => Math.random() - 0.5);
+    for (const p of shuffled.slice(0, PLAYER_CONF.GOOD_FORM_COUNT)) {
+      p.goodForm = true;
+      p.speedMult = rand(PLAYER_CONF.GOOD_FORM_SPEED_MIN, PLAYER_CONF.GOOD_FORM_SPEED_MAX);
+    }
   }
 
   outfield() {

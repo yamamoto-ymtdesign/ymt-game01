@@ -53,8 +53,13 @@ const PLAYER_CONF = {
   GK_SPEED: 6.6,
   ACCEL: 26,                  // 加速度 (m/s^2)
   // 選手ごとの速度個体差 (同じチーム内でもランダムに速い/遅いがある)
-  SPEED_VARIANCE_MIN: 0.8,
-  SPEED_VARIANCE_MAX: 1.2,
+  SPEED_VARIANCE_MIN: 0.9,
+  SPEED_VARIANCE_MAX: 1.1,
+  // その日の「調子」: チームごとにランダムで最大 GOOD_FORM_COUNT 人だけ
+  // 好調になり、通常より速い個体差レンジが割り当てられる
+  GOOD_FORM_COUNT: 3,
+  GOOD_FORM_SPEED_MIN: 1.1,
+  GOOD_FORM_SPEED_MAX: 1.2,
 };
 
 // ---- アクション(パス・シュート・守備動作) ----

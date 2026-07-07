@@ -151,13 +151,14 @@ const SPRITE_GRIDS = {
 };
 
 const SPRITE_SIZE = 16;
-// チームカラー以外の共通パレット
+// チームカラー以外の共通パレット (H=髪 は好調フラグにより差し替えるため別定数)
 const SPRITE_BASE_COLORS = {
-  H: "#2b1f14",
   S: "#f0c493",
   P: "#f5f5f5",
   B: "#1e1e1e",
 };
+const HAIR_NORMAL = "#2b1f14";
+const HAIR_GOOD_FORM = "#e8c14d";   // 「絶好調」の選手は金髪で目立たせる
 
 class Camera {
   constructor(canvas) {
@@ -196,9 +197,9 @@ class Renderer {
     this.now = 0;
   }
 
-  // チームカラーごとにスプライト一式をオフスクリーン生成してキャッシュする
-  getSprites(jersey, dark) {
-    const key = jersey + "|" + dark;
+  // チームカラー(+髪色)ごとにスプライト一式をオフスクリーン生成してキャッシュする
+  getSprites(jersey, dark, hair) {
+    const key = jersey + "|" + dark + "|" + hair;
     let set = this.spriteCache.get(key);
     if (set) return set;
 
@@ -212,7 +213,7 @@ class Renderer {
         for (let col = 0; col < grid[row].length; col++) {
           const ch = grid[row][col];
           if (ch === ".") continue;
-          c.fillStyle = ch === "J" ? jersey : ch === "L" ? dark
+          c.fillStyle = ch === "J" ? jersey : ch === "L" ? dark : ch === "H" ? hair
             : SPRITE_BASE_COLORS[ch] || "#f0f";
           c.fillRect(col, row, 1, 1);
         }
@@ -309,7 +310,8 @@ class Renderer {
     const cell = s * 0.115;               // スプライト1ドットのピクセルサイズ
     const w = SPRITE_SIZE * cell, h = SPRITE_SIZE * cell;
     const jersey = p.isGK ? p.team.colors.gk : p.team.colors.main;
-    const sprites = this.getSprites(jersey, p.team.colors.dark);
+    const hair = p.goodForm ? HAIR_GOOD_FORM : HAIR_NORMAL;
+    const sprites = this.getSprites(jersey, p.team.colors.dark, hair);
 
     // 影 (足元)
     ctx.fillStyle = "rgba(0,0,0,0.25)";

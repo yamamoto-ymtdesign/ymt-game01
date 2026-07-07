@@ -244,8 +244,8 @@ button.primary:hover {
   position: absolute;
   left: max(20px, calc(env(safe-area-inset-left) + 14px));
   bottom: max(28px, calc(env(safe-area-inset-bottom) + 22px));
-  width: 108px;
-  height: 108px;
+  width: 130px;
+  height: 130px;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.12);
   border: 2px solid rgba(255, 255, 255, 0.3);
@@ -256,13 +256,13 @@ button.primary:hover {
 /* 縦幅が小さい端末ではボタン一式を少し小さくして収まりを良くする */
 @media (max-height: 420px) {
   .touch-stick-base {
-    width: 92px;
-    height: 92px;
+    width: 110px;
+    height: 110px;
   }
   .touch-stick-knob {
-    width: 40px;
-    height: 40px;
-    margin: -20px 0 0 -20px;
+    width: 48px;
+    height: 48px;
+    margin: -24px 0 0 -24px;
   }
 }
 
@@ -270,9 +270,9 @@ button.primary:hover {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 46px;
-  height: 46px;
-  margin: -23px 0 0 -23px;
+  width: 54px;
+  height: 54px;
+  margin: -27px 0 0 -27px;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.55);
   transition: none;
@@ -284,28 +284,28 @@ button.primary:hover {
 .touch-btn-x {
   right: max(20px, env(safe-area-inset-right));
   bottom: max(24px, calc(env(safe-area-inset-bottom) + 18px));
-  width: 82px;
-  height: 82px;
-  font-size: 12px;
+  width: 96px;
+  height: 96px;
+  font-size: 13px;
   line-height: 1.15;
   border-color: #ffe14d;
 }
 
 .touch-btn-z {
-  right: max(25px, calc(env(safe-area-inset-right) + 5px));
-  bottom: max(114px, calc(env(safe-area-inset-bottom) + 108px));
-  width: 72px;
-  height: 72px;
-  font-size: 11px;
+  right: max(26px, calc(env(safe-area-inset-right) + 6px));
+  bottom: max(128px, calc(env(safe-area-inset-bottom) + 122px));
+  width: 84px;
+  height: 84px;
+  font-size: 12px;
   line-height: 1.15;
 }
 
 .touch-btn-switch {
-  right: max(38px, calc(env(safe-area-inset-right) + 18px));
-  bottom: max(194px, calc(env(safe-area-inset-bottom) + 188px));
-  width: 46px;
-  height: 46px;
-  font-size: 11px;
+  right: max(42px, calc(env(safe-area-inset-right) + 22px));
+  bottom: max(220px, calc(env(safe-area-inset-bottom) + 214px));
+  width: 52px;
+  height: 52px;
+  font-size: 12px;
 }
 
 .touch-pause {
@@ -340,16 +340,16 @@ button.primary:hover {
 
 /* 縦幅が小さい端末ではボタン一式を少し小さく、間隔も詰めて収まりを良くする */
 @media (max-height: 420px) {
-  .touch-btn-x { width: 70px; height: 70px; bottom: max(20px, calc(env(safe-area-inset-bottom) + 16px)); }
+  .touch-btn-x { width: 84px; height: 84px; bottom: max(20px, calc(env(safe-area-inset-bottom) + 16px)); }
   .touch-btn-z {
-    width: 62px; height: 62px; font-size: 10px;
-    right: max(24px, calc(env(safe-area-inset-right) + 4px));
-    bottom: max(96px, calc(env(safe-area-inset-bottom) + 92px));
+    width: 74px; height: 74px; font-size: 11px;
+    right: max(25px, calc(env(safe-area-inset-right) + 5px));
+    bottom: max(110px, calc(env(safe-area-inset-bottom) + 104px));
   }
   .touch-btn-switch {
-    width: 40px; height: 40px; font-size: 10px;
-    right: max(35px, calc(env(safe-area-inset-right) + 15px));
-    bottom: max(164px, calc(env(safe-area-inset-bottom) + 158px));
+    width: 46px; height: 46px; font-size: 11px;
+    right: max(39px, calc(env(safe-area-inset-right) + 19px));
+    bottom: max(190px, calc(env(safe-area-inset-bottom) + 184px));
   }
 }
 
