@@ -158,7 +158,9 @@ const SPRITE_BASE_COLORS = {
   B: "#1e1e1e",
 };
 const HAIR_NORMAL = "#2b1f14";
-const HAIR_GOOD_FORM = "#e8c14d";   // 「絶好調」の選手は金髪で目立たせる
+// 「絶好調」の選手は髪を青に。小さいスプライトでも肌色 (S) と混同しない
+// よう、はっきり異なる色相を選んでいる
+const HAIR_GOOD_FORM = "#2ec4ff";
 
 class Camera {
   constructor(canvas) {
