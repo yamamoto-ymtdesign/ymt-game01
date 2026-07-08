@@ -38,9 +38,15 @@ window.addEventListener("DOMContentLoaded", () => {
   const touchBtnX = document.getElementById("touch-btn-x");
 
   // 味方 GK がボールを保持している間だけ、Z/X ボタンの表示を
-  // 「ショート/ロング」キックに切替える (それ以外は常にパス・シュート/スラ表記)
+  // 「ショート/ロング」キックに切替える (それ以外は常にパス・シュート/スラ表記)。
+  // PK戦のコース選択中は Z を使わないので隠し、X は「決定」表記にする
   function updateTouchLabels() {
     if (!touchBtnZ || !touchBtnX || !game) return;
+    if (game.state === "pk" && game.pk && game.pk.phase === "aim") {
+      touchBtnZ.textContent = "-";
+      touchBtnX.textContent = "決定";
+      return;
+    }
     const gkHolding = game.ball.owner === game.controlled &&
       game.controlled && game.controlled.isGK;
     touchBtnZ.textContent = gkHolding ? "ショート" : "パス/スラ";

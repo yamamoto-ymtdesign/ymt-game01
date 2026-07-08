@@ -230,13 +230,22 @@ class Renderer {
     const ctx = this.ctx;
     this.now = performance.now();
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-    this.drawPitch();
-    if (!game) return;
+    if (!game) { this.drawPitch(); return; }
 
-    // 奥行き感を出すため y 順に描画
-    const players = game.allPlayers().slice().sort((a, b) => a.pos.y - b.pos.y);
-    for (const p of players) this.drawPlayer(p, game);
-    this.drawBall(game);
+    // PK戦のコース選択〜演出中は、通常のピッチ俯瞰の代わりにキッカー
+    // 1人称視点のゴール正面ビューを描く (配置直後の setup フェーズだけは
+    // 通常のピッチで選手の並びを見せる)
+    const inPKView = game.state === "pk_done" ||
+      (game.state === "pk" && game.pk && game.pk.phase !== "setup");
+    if (inPKView) {
+      this.drawPKView(game);
+    } else {
+      this.drawPitch();
+      // 奥行き感を出すため y 順に描画
+      const players = game.allPlayers().slice().sort((a, b) => a.pos.y - b.pos.y);
+      for (const p of players) this.drawPlayer(p, game);
+      this.drawBall(game);
+    }
     this.drawHud(game);
   }
 
@@ -421,6 +430,166 @@ class Renderer {
     }
   }
 
+  // ---------------- PK戦: キッカー1人称視点のゴール正面ビュー ----------------
+
+  // ゾーン (col:0-2 左/中央/右, row:0-1 上/下) の中心をゴール枠内の
+  // スクリーン座標で返す
+  pkZoneCenter(rect, col, row) {
+    const cw = rect.w / PK_AIM_CONF.COLS, ch = rect.h / PK_AIM_CONF.ROWS;
+    return { x: rect.left + cw * (col + 0.5), y: rect.top + ch * (row + 0.5) };
+  }
+
+  drawPKView(game) {
+    const ctx = this.ctx, W = this.canvas.width, H = this.canvas.height;
+    const pk = game.pk;
+
+    // 背景 (空 → ピッチ)
+    const sky = ctx.createLinearGradient(0, 0, 0, H);
+    sky.addColorStop(0, "#274b6b");
+    sky.addColorStop(1, "#1a3348");
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#2e7d3a";
+    ctx.fillRect(0, H * 0.62, W, H * 0.38);
+
+    const rect = { left: W / 2 - 240, top: 78, w: 480, h: 190 };
+    const goalLineY = rect.top + rect.h;
+
+    // ゴールネット (奥行き感のある斜め格子)
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(rect.left, rect.top, rect.w, rect.h);
+    ctx.clip();
+    ctx.strokeStyle = "rgba(255,255,255,0.18)";
+    ctx.lineWidth = 1;
+    for (let gx = rect.left - rect.h; gx < rect.left + rect.w + rect.h; gx += 16) {
+      ctx.beginPath();
+      ctx.moveTo(gx, rect.top);
+      ctx.lineTo(gx + rect.h, goalLineY);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(gx, goalLineY);
+      ctx.lineTo(gx + rect.h, rect.top);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // ゴールポスト・クロスバー
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 7;
+    ctx.strokeRect(rect.left, rect.top, rect.w, rect.h);
+
+    // 3x2 ゾーンの区切り線
+    ctx.strokeStyle = "rgba(255,255,255,0.4)";
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([6, 6]);
+    for (let c = 1; c < PK_AIM_CONF.COLS; c++) {
+      const x = rect.left + (rect.w / PK_AIM_CONF.COLS) * c;
+      ctx.beginPath(); ctx.moveTo(x, rect.top); ctx.lineTo(x, goalLineY); ctx.stroke();
+    }
+    for (let r = 1; r < PK_AIM_CONF.ROWS; r++) {
+      const y = rect.top + (rect.h / PK_AIM_CONF.ROWS) * r;
+      ctx.beginPath(); ctx.moveTo(rect.left, y); ctx.lineTo(rect.left + rect.w, y); ctx.stroke();
+    }
+    ctx.setLineDash([]);
+
+    // ユーザーが選択中のゾーンをハイライト (自分の役割の分だけ。相手の選択は見せない)
+    if (pk.phase === "aim") {
+      const pulse = 0.5 + 0.5 * Math.sin(this.now / 130);
+      if (pk.kickerIsUser && !pk.kickerConfirmed) {
+        this.drawPKCursor(rect, pk.kickerChoice, `rgba(255,225,77,${0.35 + 0.25 * pulse})`, "#ffe14d");
+      }
+      if (pk.keeperIsUser && !pk.keeperConfirmed) {
+        this.drawPKCursor(rect, pk.keeperChoice, `rgba(79,195,247,${0.35 + 0.25 * pulse})`, "#4fc3f7");
+      }
+      // 確定済みの自分の選択は薄く残しておく (相手を待っている間の目印)
+      if (pk.kickerIsUser && pk.kickerConfirmed) {
+        this.drawPKCursor(rect, pk.kickerChoice, "rgba(255,225,77,0.18)", "rgba(255,225,77,0.6)");
+      }
+      if (pk.keeperIsUser && pk.keeperConfirmed) {
+        this.drawPKCursor(rect, pk.keeperChoice, "rgba(79,195,247,0.18)", "rgba(79,195,247,0.6)");
+      }
+
+      // 残り時間バー
+      const ratio = clamp(pk.timer / PK_AIM_CONF.AIM_TIME, 0, 1);
+      ctx.fillStyle = "rgba(0,0,0,0.5)";
+      ctx.fillRect(W / 2 - 90, rect.top - 22, 180, 8);
+      ctx.fillStyle = ratio < 0.3 ? "#ff8b3d" : "#7ee36a";
+      ctx.fillRect(W / 2 - 89, rect.top - 21, 178 * ratio, 6);
+    }
+
+    // シュート/セーブのアニメーション (anim/result フェーズで進行度 1 まで進む)
+    const animT = pk.phase === "anim"
+      ? clamp(1 - pk.timer / PK_AIM_CONF.ANIM_TIME, 0, 1)
+      : (pk.phase === "result" ? 1 : 0);
+    const ease = animT * (2 - animT);
+
+    const kickerStart = { x: W / 2, y: goalLineY + 150 };
+    const ballTarget = this.pkZoneCenter(rect, pk.kickerChoice.col, pk.kickerChoice.row);
+    const ballX = lerp(kickerStart.x, ballTarget.x, ease);
+    const ballY = lerp(kickerStart.y, ballTarget.y, ease);
+
+    const gkStart = { x: W / 2, y: goalLineY - 14 };
+    const gkTarget = this.pkZoneCenter(rect, pk.keeperChoice.col, pk.keeperChoice.row);
+    const gkX = lerp(gkStart.x, gkTarget.x, animT >= 1 ? ease : ease * 0.92);
+    const gkY = lerp(gkStart.y, gkTarget.y, animT >= 1 ? ease : ease * 0.92);
+
+    // 一致 (セーブ) ならボールをキーパー付近で止め、外れ (ゴール) なら
+    // そのままネットまで進める
+    const shown = animT > 0 || pk.phase !== "aim";
+    if (shown) {
+      // キーパー
+      const gkColor = pk.gk ? pk.gk.team.colors.gk : "#c9a227";
+      ctx.fillStyle = gkColor;
+      ctx.beginPath();
+      ctx.arc(gkX, gkY, 16, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#fff";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // ボール (一致した場合は演出後半でキーパー位置に吸い寄せる)
+      const bx = pk.matched && animT > 0.6 ? lerp(ballX, gkX, (animT - 0.6) / 0.4) : ballX;
+      const by = pk.matched && animT > 0.6 ? lerp(ballY, gkY, (animT - 0.6) / 0.4) : ballY;
+      ctx.fillStyle = "#fff";
+      ctx.beginPath();
+      ctx.arc(bx, by, 9, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#333";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    } else {
+      // まだ誰も動いていない (aim フェーズ序盤): キッカーの足元にボールだけ置く
+      ctx.fillStyle = "#fff";
+      ctx.beginPath();
+      ctx.arc(kickerStart.x, kickerStart.y, 9, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#333";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+
+    // キッカー名 (下部)
+    if (pk.shooter) {
+      ctx.fillStyle = pk.shooter.team.colors.main;
+      ctx.font = "bold 15px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(pk.shooter.team.name + " #" + pk.shooter.num + " のキック", W / 2, H - 46);
+    }
+  }
+
+  // 選択ゾーンのハイライト枠を描く
+  drawPKCursor(rect, choice, fill, stroke) {
+    const ctx = this.ctx;
+    const cw = rect.w / PK_AIM_CONF.COLS, ch = rect.h / PK_AIM_CONF.ROWS;
+    const x = rect.left + cw * choice.col, y = rect.top + ch * choice.row;
+    ctx.fillStyle = fill;
+    ctx.fillRect(x + 2, y + 2, cw - 4, ch - 4);
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = 3;
+    ctx.strokeRect(x + 2, y + 2, cw - 4, ch - 4);
+  }
+
   // ---------------- ボール ----------------
 
   drawBall(game) {
@@ -496,9 +665,13 @@ class Renderer {
         ].filter(Boolean).join("   ")
       : null;
     const guide = inPK
-      ? (game.pk && game.pk.phase === "shoot" && game.pk.kickerIsUser
-          ? "矢印: 助走の左右調整   X(長押し): シュート"
-          : "相手のキックを見守ろう…")
+      ? (game.pk && game.pk.phase === "aim"
+          ? (game.pk.kickerIsUser && !game.pk.kickerConfirmed
+              ? "矢印: コースを選ぶ (左右/上下)   X: 決定"
+              : game.pk.keeperIsUser && !game.pk.keeperConfirmed
+              ? "矢印: 飛ぶ方向を選ぶ (左右/上下)   X: 決定"
+              : "コース決定を待っています…")
+          : "PK戦")
       : volleyHint
       ? volleyHint
       : gkHolding

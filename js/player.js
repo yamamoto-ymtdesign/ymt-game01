@@ -348,14 +348,6 @@ class Player {
     const dir = this.team.attackDir;
     const goalX = -dir * PITCH.HALF_LEN;
 
-    // PK戦: 飛び出さずゴールライン上に留まり、ボールの左右位置だけを追う
-    if (game.pk && game.pk.gk === this) {
-      this.moveSpeed = PLAYER_CONF.GK_SPEED * this.speedMult;
-      const ty = clamp(ball.pos.y * 0.6, -(PITCH.GOAL_HALF - 0.3), PITCH.GOAL_HALF - 0.3);
-      this.moveTarget = { x: goalX + dir * 1.2, y: ty };
-      return;
-    }
-
     // キャッチ後: 少し保持してから味方へフィードする
     if (ball.owner === this) {
       this.holdTimer -= dt;

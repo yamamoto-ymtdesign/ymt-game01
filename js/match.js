@@ -16,6 +16,14 @@
 //      ただしヒステリシス (SWITCH_CONF) でチャタリングを防止する。
 // =====================================================================
 
+// PK戦: CPU が選ぶコース (キッカー/キーパーとも完全ランダム)
+function randomPKZone() {
+  return {
+    col: Math.floor(Math.random() * PK_AIM_CONF.COLS),
+    row: Math.floor(Math.random() * PK_AIM_CONF.ROWS),
+  };
+}
+
 class Game {
   constructor(settings) {
     this.halfLength = settings.halfLengthMin * 60;
@@ -238,6 +246,9 @@ class Game {
     }
 
     const cur = this.controlled;
+    // タックル・スライディングなど動作中は、その動作が終わるまで絶対に
+    // 横取りしない (アクションを起こした瞬間に権限が移ってしまうのを防止)
+    if (cur && cur.busy) return;
     if (!cur || cur.isGK) {
       this.controlled = best;
       this.switchLock = SWITCH_CONF.LOCK_TIME;
@@ -256,9 +267,12 @@ class Game {
 
     if (best === cur) return;
     const curS = score(cur);
-    // 現在の操作キャラが守備の役に立たないほど離れている場合は、
-    // 入力中でも (無入力を待たず) 強制的に切替える
-    const farOverride = curS > SWITCH_CONF.FAR_OVERRIDE_GAP;
+    // 現在の操作キャラが「ボールそのものから」離れすぎている場合だけ、
+    // 入力中でも (無入力を待たず) 強制的に切替える。defensiveScore には
+    // 前掛かりペナルティ等が乗るため、ボール至近距離でタックルに向かって
+    // いる最中に誤って切り替わらないよう、ここは純粋な距離だけで判定する
+    const curBallDist = dist(cur.pos, pred);
+    const farOverride = curBallDist > SWITCH_CONF.FAR_OVERRIDE_GAP;
     // ヒステリシス: ロック解除後・(無入力が一定フレーム続いた or 遠すぎる)後、
     // かつ十分な差があるときだけ切替える (操作中の横取り防止)
     if (this.switchLock <= 0 &&
@@ -827,7 +841,9 @@ class Game {
   // ---------------- PK 戦 ----------------
   //  状態: pk.phase
   //    setup  - キッカー/GK配置直後の静止
-  //    shoot  - キッカーが撃てる (ユーザーなら操作可、CPUなら一定時間後に自動で撃つ)
+  //    aim    - キッカーとキーパーがそれぞれコース (3x2ゾーン) を選ぶ
+  //             (お互いの選択は見えない。ユーザーが関与する側だけ操作できる)
+  //    anim   - 選んだコースが一致すればセーブ、外れればゴールの演出
   //    result - ゴール/失敗の演出中
   //  PK_CONF.ROUNDS 本ずつ終えても同点ならサドンデス (1本ずつ) に突入する
 
@@ -888,12 +904,7 @@ class Game {
     pk.shooter = shooter;
     pk.gk = gk;
     pk.kickerIsUser = kicking.isUser;
-    pk.cpuKicked = false;
-    pk.cpuKickAt = rand(0.6, 1.2);
-    pk.shotFired = false;
-    pk.settleTimer = 0;
-    pk.timeout = PK_CONF.TIMEOUT;
-    pk.preShotTimeout = PK_CONF.TIMEOUT;   // 撃たないまま経過したら強制的に蹴る
+    pk.keeperIsUser = !kicking.isUser;
     pk.phase = "setup";
     pk.timer = PK_CONF.SETUP_TIME;
 
@@ -906,29 +917,18 @@ class Game {
 
     if (pk.phase === "setup") {
       pk.timer -= dt;
-      if (pk.timer <= 0) pk.phase = "shoot";
+      if (pk.timer <= 0) this.startPKAim();
       return;
     }
 
-    if (pk.phase === "shoot") {
-      pk.gk.updateAI(this, dt);
-      pk.gk.update(this, dt);
+    if (pk.phase === "aim") {
+      this.updatePKAim(dt, input);
+      return;
+    }
 
-      if (pk.kickerIsUser) {
-        this.updatePKShooter(pk.shooter, input, dt);
-      } else if (!pk.cpuKicked) {
-        pk.cpuKickAt -= dt;
-        if (pk.cpuKickAt <= 0) {
-          const aimY = rand(-1, 1) * (PITCH.GOAL_HALF - 0.6);
-          this.shoot(pk.shooter, aimY, rand(0.7, 1.0));
-          pk.cpuKicked = true;
-        }
-      }
-      pk.shooter.update(this, dt);
-
-      this.ball.update(dt);
-      if (!this.ball.owner) this.tryPickups();
-      this.checkPKOutcome(dt);
+    if (pk.phase === "anim") {
+      pk.timer -= dt;
+      if (pk.timer <= 0) this.resolvePKAttempt(!pk.matched);
       return;
     }
 
@@ -941,68 +941,85 @@ class Game {
     }
   }
 
-  // PK のキッカー操作: 助走 (狭い範囲) + X 長押しでシュート。Z によるパスは禁止
-  updatePKShooter(p, input, dt) {
-    if (p.busy) {
-      if (this.shootCharge >= 0) this.shootCharge = -1;
-      return;
-    }
-    const ax = input.axis();
-    const charging = this.shootCharge >= 0;
-    let speed = PLAYER_CONF.DRIBBLE_SPEED * p.speedMult;
-    if (charging) speed *= 0.4;
+  // コース選択フェーズ開始: キッカー/キーパーとも初期カーソルは中央上、
+  // CPU側は少し「考える」演出のあとランダムに決める (お互いの選択は見えない)
+  startPKAim() {
+    const pk = this.pk;
+    pk.phase = "aim";
+    pk.timer = PK_AIM_CONF.AIM_TIME;
+    pk.kickerChoice = { col: 1, row: 0 };
+    pk.keeperChoice = { col: 1, row: 0 };
+    pk.kickerConfirmed = false;
+    pk.keeperConfirmed = false;
+    pk.cpuKickerDecideAt = rand(0.8, 2.0);
+    pk.cpuKeeperDecideAt = rand(0.8, 2.0);
+    pk.cursorCooldown = 0;   // タッチスティック等の連続入力をカーソル一段分に間引く
+  }
 
-    if (ax) {
-      p.moveTarget = { x: p.pos.x + ax.x * 4, y: p.pos.y + ax.y * 4 };
-      p.moveSpeed = speed;
-      p.facing = { x: ax.x, y: ax.y };
-    } else {
-      p.moveTarget = null;
-    }
+  updatePKAim(dt, input) {
+    const pk = this.pk;
+    pk.timer -= dt;
+    pk.cursorCooldown = Math.max(0, pk.cursorCooldown - dt);
 
-    if (this.ball.owner !== p) return;   // 蹴った後は何もしない
-
-    if (input.wasPressed("KeyX")) this.shootCharge = 0;
-    if (this.shootCharge >= 0) {
-      this.shootCharge = Math.min(1, this.shootCharge + dt / ACTION_CONF.SHOOT_CHARGE_TIME);
-      if (input.wasReleased("KeyX") || this.shootCharge >= 1) {
-        const aimY = ax ? ax.y * 2.6 : 0;
-        this.shoot(p, aimY, this.shootCharge);
-        this.shootCharge = -1;
+    if (pk.kickerIsUser && !pk.kickerConfirmed) {
+      this.updatePKCursor(pk.kickerChoice, input);
+      if (input.wasPressed("KeyX")) pk.kickerConfirmed = true;
+    } else if (!pk.kickerConfirmed) {
+      pk.cpuKickerDecideAt -= dt;
+      if (pk.cpuKickerDecideAt <= 0) {
+        pk.kickerChoice = randomPKZone();
+        pk.kickerConfirmed = true;
       }
+    }
+
+    if (pk.keeperIsUser && !pk.keeperConfirmed) {
+      this.updatePKCursor(pk.keeperChoice, input);
+      if (input.wasPressed("KeyX")) pk.keeperConfirmed = true;
+    } else if (!pk.keeperConfirmed) {
+      pk.cpuKeeperDecideAt -= dt;
+      if (pk.cpuKeeperDecideAt <= 0) {
+        pk.keeperChoice = randomPKZone();
+        pk.keeperConfirmed = true;
+      }
+    }
+
+    // 制限時間切れなら、今のカーソル位置のまま強制的に確定させる
+    if (pk.timer <= 0) {
+      pk.kickerConfirmed = true;
+      pk.keeperConfirmed = true;
+    }
+
+    if (pk.kickerConfirmed && pk.keeperConfirmed) {
+      pk.matched = pk.kickerChoice.col === pk.keeperChoice.col &&
+        pk.kickerChoice.row === pk.keeperChoice.row;
+      pk.phase = "anim";
+      pk.timer = PK_AIM_CONF.ANIM_TIME;
     }
   }
 
-  // ゴール / キャッチ / 外れ (静止 or タイムアウト) を判定する
-  checkPKOutcome(dt) {
-    const pk = this.pk, b = this.ball;
-    if (b.owner !== pk.shooter) pk.shotFired = true;   // 蹴った/キャッチされた瞬間
+  // コース選択カーソルの移動。矢印キーは押した瞬間に1段動かす。
+  // タッチジョイスティックは連続値しか取れないため、倒した方向へ
+  // cursorCooldown で間引きながら1段ずつ動かす (キーボードの長押しでも
+  // 同じ間引きロジックを使い、リピート入力として扱う)
+  updatePKCursor(choice, input) {
+    const pk = this.pk;
+    let moved = false;
+    if (input.wasPressed("ArrowLeft")) { choice.col = Math.max(0, choice.col - 1); moved = true; }
+    if (input.wasPressed("ArrowRight")) { choice.col = Math.min(PK_AIM_CONF.COLS - 1, choice.col + 1); moved = true; }
+    if (input.wasPressed("ArrowUp")) { choice.row = 0; moved = true; }
+    if (input.wasPressed("ArrowDown")) { choice.row = 1; moved = true; }
+    if (moved) { pk.cursorCooldown = 0.25; return; }
 
-    if (!pk.shotFired) {
-      // 蹴らないまま固まってしまわないよう、時間切れなら弱く正面へ蹴らせる
-      pk.preShotTimeout -= dt;
-      if (pk.preShotTimeout <= 0) {
-        this.shoot(pk.shooter, 0, 0.3);
-        pk.shotFired = true;
-      }
-      return;
+    if (pk.cursorCooldown > 0) return;
+    const ax = input.axis();
+    if (!ax) return;
+    if (Math.abs(ax.x) > 0.5) {
+      choice.col = clamp(choice.col + (ax.x > 0 ? 1 : -1), 0, PK_AIM_CONF.COLS - 1);
+      pk.cursorCooldown = 0.25;
+    } else if (Math.abs(ax.y) > 0.5) {
+      choice.row = ax.y > 0 ? 1 : 0;
+      pk.cursorCooldown = 0.25;
     }
-
-    if (Math.abs(b.pos.x) > PITCH.HALF_LEN + 0.2) {
-      const scored = Math.abs(b.pos.y) <= PITCH.GOAL_HALF;
-      this.resolvePKAttempt(scored);
-      return;
-    }
-    if (b.owner === pk.gk) { this.resolvePKAttempt(false); return; }
-
-    pk.timeout -= dt;
-    if (!b.owner && !b.airborne && vlen(b.vel) < 0.4) {
-      pk.settleTimer += dt;
-      if (pk.settleTimer > 0.5) { this.resolvePKAttempt(false); return; }
-    } else {
-      pk.settleTimer = 0;
-    }
-    if (pk.timeout <= 0) this.resolvePKAttempt(false);
   }
 
   resolvePKAttempt(scored) {
