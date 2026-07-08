@@ -479,13 +479,14 @@ class Game {
 
   // ---------------- クロス (センタリング) ----------------
 
-  // 相手ゴールライン際 (ペナルティエリアの奥行きの範囲) かつペナルティ
-  // エリアの幅より外側 (サイド) にいるか
+  // 相手ゴールラインから CROSS_CONF.ZONE_DEPTH の範囲 (ペナルティエリアの
+  // 奥行きよりだいぶ手前、味方陣寄りまで含む) かつペナルティエリアの幅
+  // より外側 (サイド) にいるか
   isCrossZone(p) {
     const dir = p.team.attackDir;
     const goalX = PITCH.HALF_LEN * dir;
     const depth = Math.abs(goalX - p.pos.x);
-    return depth <= PITCH.PENALTY_DEPTH && Math.abs(p.pos.y) > PITCH.PENALTY_HALF_WIDTH;
+    return depth <= CROSS_CONF.ZONE_DEPTH && Math.abs(p.pos.y) > PITCH.PENALTY_HALF_WIDTH;
   }
 
   // クロスを送る: 相手ボックス内で最もゴール中央に近い味方 (いなければ
