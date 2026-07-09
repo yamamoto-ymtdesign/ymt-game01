@@ -540,20 +540,51 @@ class Renderer {
 
     // GK はニュートラルなポジション (ゴール中央) に常に立っており、
     // aim フェーズ中はまだダイブしない (ease が 0 のため自然と中央に留まる)
+    // 真ん中下段は飛ばずに立ったまま止める。真ん中上段はその場で垂直にジャンプ。
+    // それ以外は狙われた方向へ体を伸ばしてダイブする
+    const midCol = Math.floor(PK_AIM_CONF.COLS / 2);
+    const isMidLow = pk.keeperChoice.col === midCol && pk.keeperChoice.row === PK_AIM_CONF.ROWS - 1;
+    const isMidHigh = pk.keeperChoice.col === midCol && pk.keeperChoice.row === 0;
+
     const gkStart = { x: W / 2, y: goalLineY - 14 };
     const gkTarget = this.pkZoneCenter(rect, pk.keeperChoice.col, pk.keeperChoice.row);
-    const gkX = lerp(gkStart.x, gkTarget.x, animT >= 1 ? ease : ease * 0.92);
-    const gkY = lerp(gkStart.y, gkTarget.y, animT >= 1 ? ease : ease * 0.92);
+    const diveT = animT >= 1 ? ease : ease * 0.92;
 
-    // 相手GK (常時表示。チームカラー本体色で敵チームだと分かるようにする)
-    const gkColor = pk.gk ? pk.gk.team.colors.main : "#e04a3a";
-    ctx.fillStyle = gkColor;
-    ctx.beginPath();
-    ctx.arc(gkX, gkY, 16, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = "#fff";
-    ctx.lineWidth = 2;
-    ctx.stroke();
+    let gkX, gkY, gkPose, gkRot;
+    if (isMidLow) {
+      gkX = gkStart.x;
+      gkY = gkStart.y;
+      gkPose = "stand";
+      gkRot = null;
+    } else if (isMidHigh) {
+      gkX = gkStart.x;
+      gkY = lerp(gkStart.y, gkTarget.y, diveT);
+      gkPose = "slide";
+      gkRot = 0;
+    } else {
+      gkX = lerp(gkStart.x, gkTarget.x, diveT);
+      gkY = lerp(gkStart.y, gkTarget.y, diveT);
+      gkPose = "slide";
+      gkRot = Math.atan2(gkTarget.y - gkStart.y, gkTarget.x - gkStart.x) - Math.PI / 2;
+    }
+
+    // 相手GK (実際のスプライトを表示。チームのメインカラーで敵味方が分かる)
+    const gkJersey = pk.gk ? pk.gk.team.colors.main : "#e04a3a";
+    const gkDark = pk.gk ? pk.gk.team.colors.dark : "#a03024";
+    const gkSprites = this.getSprites(gkJersey, gkDark, HAIR_NORMAL);
+    const gkCell = 2.6;
+    const gw = SPRITE_SIZE * gkCell, gh = SPRITE_SIZE * gkCell;
+    const gkImg = gkPose === "stand" ? gkSprites.stand : gkSprites.slide;
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    ctx.translate(gkX, gkY);
+    if (gkRot !== null) {
+      ctx.rotate(gkRot);
+      ctx.drawImage(gkImg, -gw / 2, -gh / 2, gw, gh);
+    } else {
+      ctx.drawImage(gkImg, -gw / 2, -gh + gkCell * 2, gw, gh);
+    }
+    ctx.restore();
 
     // ボール (一致 = セーブなら演出後半でGK位置に吸い寄せる)
     const bx = pk.matched && animT > 0.6 ? lerp(ballX, gkX, (animT - 0.6) / 0.4) : ballX;

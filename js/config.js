@@ -52,9 +52,9 @@ const PLAYER_CONF = {
   CHASE_BOOST: 1.12,          // 守備チェイサーの追走速度倍率 (保持者に追いつける)
   GK_SPEED: 6.6,
   ACCEL: 26,                  // 加速度 (m/s^2)
-  // 選手ごとの速度個体差 (同じチーム内でもランダムに速い/遅いがある)
-  SPEED_VARIANCE_MIN: 0.9,
-  SPEED_VARIANCE_MAX: 1.1,
+  // 通常選手は個体差なし (全員 1.0倍)。差がつくのは絶好調選手のみ
+  SPEED_VARIANCE_MIN: 1.0,
+  SPEED_VARIANCE_MAX: 1.0,
   // その日の「調子」: チームごとにランダムで最大 GOOD_FORM_COUNT 人だけ
   // 好調になり、通常より速い個体差レンジが割り当てられる
   GOOD_FORM_COUNT: 3,
