@@ -62,6 +62,28 @@ const PLAYER_CONF = {
   GOOD_FORM_SPEED_MAX: 1.1,
 };
 
+// ---- スタミナ (疲労) ----
+// RUN_SPEED を基準にした「運動強度」に応じて減少・回復する。
+// 全力疾走を続けるほど速度が落ち、止まって/歩いていれば回復する。
+// ハーフタイムでも少しだけ回復する (完全回復はしない)
+const STAMINA_CONF = {
+  MAX: 100,
+  DRAIN_RATE: 0.9,     // 運動強度1(RUN_SPEED相当)で走り続けたときの毎秒消費量
+  RECOVER_RATE: 2.2,   // ほぼ静止しているときの毎秒回復量
+  MIN_MULT: 0.82,      // スタミナ0のときの速度倍率 (最大で18%低下)
+  HALFTIME_RECOVER: 45,
+};
+
+// ---- ファウル (軽量版: スライディングタックルのみ対象) ----
+// スライディングで相手に接触したとき、相手の背後から入った (相手の向き
+// と滑走方向がほぼ一致 = 追い越しざまに刈った) 場合は高確率、それ以外は
+// 低確率でファウルを取る。累積2回目以降は「警告」として表示する
+// (退場は実装しない: プレー人数が変わる大掛かりな変更を避けるため)
+const FOUL_CONF = {
+  BASE_PROB: 0.15,
+  BEHIND_PROB: 0.55,
+};
+
 // ---- アクション(パス・シュート・守備動作) ----
 const ACTION_CONF = {
   PASS_SPEED_MIN: 11,
@@ -193,18 +215,52 @@ const DIFFICULTY = {
   hard:   { aiSpeed: 1.03, aiTackleProb: 1.4, aiThink: 0.28, shootErr: 0.6 },
 };
 
+// ---- トーナメントモード (ベスト16からの4回戦、単発試合とは別モード) ----
+// ユーザー (BLUES) が実際に対戦する相手だけを、ラウンドが進むごとに
+// このプールからランダムに (重複なく) 選ぶ。他の山の結果はシミュレート
+// しない (見えない試合を計算する必要がないため、軽量に保てる)
+const TOURNAMENT_TEAMS = [
+  { name: "REDS",     colors: { main: "#e04a3a", dark: "#8f231a", gk: "#c9a227" } },
+  { name: "TIGERS",   colors: { main: "#f2871f", dark: "#a85a12", gk: "#2fb96e" } },
+  { name: "OWLS",     colors: { main: "#7b3fb5", dark: "#4a2570", gk: "#e0c93a" } },
+  { name: "HAWKS",    colors: { main: "#383838", dark: "#1a1a1a", gk: "#e0c93a" } },
+  { name: "WAVES",    colors: { main: "#17a2b8", dark: "#0f6b78", gk: "#e0c93a" } },
+  { name: "FOXES",    colors: { main: "#d6336c", dark: "#8a1f46", gk: "#2fb96e" } },
+  { name: "WOLVES",   colors: { main: "#5b6270", dark: "#2f333a", gk: "#e0c93a" } },
+  { name: "BULLS",    colors: { main: "#8b4513", dark: "#5a2d0c", gk: "#2fb96e" } },
+  { name: "EAGLES",   colors: { main: "#6b8e23", dark: "#425a15", gk: "#e0c93a" } },
+  { name: "COBRAS",   colors: { main: "#4b3fae", dark: "#2b2468", gk: "#e0c93a" } },
+  { name: "PANTHERS", colors: { main: "#212529", dark: "#000000", gk: "#e0c93a" } },
+  { name: "FALCONS",  colors: { main: "#0e8a6c", dark: "#095c48", gk: "#f2871f" } },
+  { name: "LIONS",    colors: { main: "#eab308", dark: "#92700a", gk: "#2fb96e" } },
+  { name: "RAPTORS",  colors: { main: "#7c2d12", dark: "#431705", gk: "#e0c93a" } },
+  { name: "SHARKS",   colors: { main: "#d97706", dark: "#8a4c04", gk: "#2fb96e" } },
+];
+
+const TOURNAMENT_ROUND_NAMES = ["ベスト16", "準々決勝", "準決勝", "決勝"];
+// ラウンドが進むごとに敵AIを少しずつ強くする (難易度セレクトの値を基準に掛け算)
+const TOURNAMENT_ROUND_SCALE = [1, 1.05, 1.1, 1.18];
+
 // ---- ユーザーが変更できる設定 (localStorage に保存) ----
 const Settings = {
   data: {
     halfLengthMin: 5,       // 前後半それぞれの長さ(分)
     difficulty: "normal",
     // 通算成績 (連勝記録込み)。PK戦で決着した場合も勝敗としてカウントする
-    record: { wins: 0, losses: 0, draws: 0, streak: 0, bestStreak: 0 },
+    record: { wins: 0, losses: 0, draws: 0, streak: 0, bestStreak: 0, tournamentTitles: 0 },
   },
   load() {
     try {
       const raw = localStorage.getItem("ymt-soccer-settings");
-      if (raw) Object.assign(this.data, JSON.parse(raw));
+      if (raw) {
+        const saved = JSON.parse(raw);
+        // record はネストしたオブジェクトなので、新しく追加したフィールド
+        // (例: tournamentTitles) が古い保存データで欠けていても
+        // デフォルト値で補えるよう浅いマージではなく個別に上書きする
+        const record = Object.assign({}, this.data.record, saved.record);
+        Object.assign(this.data, saved);
+        this.data.record = record;
+      }
     } catch (e) { /* 保存データが壊れていても初期値で続行 */ }
   },
   save() {

@@ -189,6 +189,10 @@ button.primary:hover {
   font-size: 22px;
 }
 
+.hidden {
+  display: none !important;
+}
+
 /* =====================================================================
    タッチ操作 (仮想スティック + アクションボタン)
    指で操作する端末 (pointer: coarse) でのみ表示する。

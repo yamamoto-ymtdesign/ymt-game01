@@ -27,14 +27,22 @@ function randomPKZone() {
 class Game {
   constructor(settings) {
     this.halfLength = settings.halfLengthMin * 60;
-    this.diff = DIFFICULTY[settings.difficulty] || DIFFICULTY.normal;
+    const baseDiff = DIFFICULTY[settings.difficulty] || DIFFICULTY.normal;
+    // トーナメントではラウンドが進むごとに敵AIを少し強くする (diffScale)。
+    // 単発試合では settings.diffScale が渡されないので常に等倍のまま
+    this.diff = this.scaleDifficulty(baseDiff, settings.diffScale || 1);
     this.normalDiff = DIFFICULTY.normal;   // ユーザーチームの AI は常に normal
 
+    // トーナメントモードでは対戦相手のプリセット (名前・カラー) が渡される。
+    // 単発試合では常に REDS 固定 (従来通り)
+    const cpuPreset = settings.cpuPreset || TOURNAMENT_TEAMS[0];
     this.userTeam = new Team(0, "BLUES", true, +1,
       { main: "#2f6fe0", dark: "#173e8f", gk: "#2fb96e" });
-    this.cpuTeam = new Team(1, "REDS", false, -1,
-      { main: "#e04a3a", dark: "#8f231a", gk: "#c9a227" });
+    this.cpuTeam = new Team(1, cpuPreset.name, false, -1, cpuPreset.colors);
     this.teams = [this.userTeam, this.cpuTeam];
+
+    // トーナメント進行中だけセットされる (HUD表示用)。単発試合では null
+    this.roundLabel = settings.roundLabel || null;
 
     this.ball = new Ball();
     this.score = [0, 0];
@@ -56,8 +64,21 @@ class Game {
     this.restartTaker = null;     // リスタートの出し手
     this.inputIdleFrames = 0;     // ユーザーが無入力のまま経過したフレーム数
     this.pk = null;               // PK戦の状態 (試合が同点で終わったときだけ生成)
+    this.offsideFlash = null;     // オフサイドライン表示演出 {x, timer}
 
     this.setupKickoff(this.userTeam, "キックオフ");
+  }
+
+  // 難易度プリセットを scale 倍だけ強く (弱く) した新しいオブジェクトを返す。
+  // 元の DIFFICULTY オブジェクトは書き換えない (他の試合と共有されているため)
+  scaleDifficulty(base, scale) {
+    if (scale === 1) return base;
+    return {
+      aiSpeed: base.aiSpeed * scale,
+      aiTackleProb: Math.min(1.6, base.aiTackleProb * scale),
+      aiThink: base.aiThink / scale,
+      shootErr: base.shootErr / scale,
+    };
   }
 
   // ---------------- 汎用ヘルパー ----------------
@@ -115,6 +136,63 @@ class Game {
     if (p.team.isUser) this.controlled = p;
   }
 
+  // ---------------- ファウル (軽量版: スライディングのみ対象) ----------------
+
+  // tackler が victim をスライディングで転ばせた瞬間に呼ばれる。
+  // 確率でファウルを取り、取った場合は true を返す (呼び出し元はそこで
+  // 通常のボール処理を打ち切る)。victim の背後から入った (追い越しざまに
+  // 刈った) 場合は高確率、それ以外は低確率で笛が鳴る
+  maybeCallFoul(tackler, victim) {
+    const fromBehind = dot(tackler.slideDir, victim.facing) > 0.3;
+    const prob = fromBehind ? FOUL_CONF.BEHIND_PROB : FOUL_CONF.BASE_PROB;
+    if (Math.random() >= prob) return false;
+
+    tackler.fouls++;
+    const carded = tackler.fouls >= 2;
+    // doRestart() 内の setFreeze() がバナーを上書きするため、ここでは
+    // showBanner を呼ばず、ファウルの内容自体をリスタートのラベルとして渡す
+    const label = (carded ? "警告(" + tackler.fouls + "枚目)! " : "ファウル! ") +
+      tackler.team.name + " #" + tackler.num;
+    const spot = {
+      x: clamp(victim.pos.x, -(PITCH.HALF_LEN - 1), PITCH.HALF_LEN - 1),
+      y: clamp(victim.pos.y, -(PITCH.HALF_WID - 1), PITCH.HALF_WID - 1),
+    };
+    this.doRestart(label, victim.team, spot);
+    return true;
+  }
+
+  // ---------------- オフサイド ----------------
+
+  // from が to へパスを出した瞬間、to がオフサイドポジションにいるか判定する。
+  // キックイン/コーナー/ゴールキックなどのリスタートは対象外 (実際のルール通り)。
+  // 相手陣内かつ、相手の最終ライン (GKを除く最も後ろの選手) より前に出ていて、
+  // かつパスの出し手より前にいる場合にオフサイドとする
+  checkOffside(from, to) {
+    if (this.restartPassOnly) return false;
+    if (to.isGK) return false;
+    const dir = from.team.attackDir;
+    const af = (pos) => pos.x * dir;   // 攻撃方向を + とした前進度
+    if (af(to.pos) <= 0) return false;                // 自陣なら対象外
+    if (af(to.pos) <= af(from.pos) + 0.3) return false;  // ボールより前でなければ対象外
+
+    const oppOutfield = this.opponentsOf(from.team).filter((p) => !p.isGK);
+    if (oppOutfield.length === 0) return false;
+    const lineDepth = Math.max(...oppOutfield.map((p) => af(p.pos)));
+    return af(to.pos) > lineDepth + 0.3;   // 僅かでも並んでいればオンサイド
+  }
+
+  callOffside(from, to) {
+    // doRestart() 内の setFreeze() がバナーを上書きするため、ラベル文字列で
+    // 「オフサイド」だと分かるようにする (showBanner を別途呼ぶ必要はない)
+    this.offsideFlash = { x: to.pos.x, timer: 1.3 };
+    const defTeam = this.otherTeam(from.team);
+    const spot = {
+      x: clamp(to.pos.x, -(PITCH.HALF_LEN - 1), PITCH.HALF_LEN - 1),
+      y: clamp(to.pos.y, -(PITCH.HALF_WID - 1), PITCH.HALF_WID - 1),
+    };
+    this.doRestart("オフサイド: フリーキック", defTeam, spot);
+  }
+
   // ---------------- キックオフ・前後半 ----------------
 
   setupKickoff(kickTeam, text) {
@@ -132,6 +210,10 @@ class Game {
     this.half = 2;
     this.time = 0;
     for (const t of this.teams) t.attackDir *= -1;
+    // ハーフタイムでスタミナを少しだけ回復させる (完全回復はしない)
+    for (const p of this.allPlayers()) {
+      p.stamina = Math.min(STAMINA_CONF.MAX, p.stamina + STAMINA_CONF.HALFTIME_RECOVER);
+    }
     this.setupKickoff(this.cpuTeam, "後半キックオフ");
   }
 
@@ -145,6 +227,10 @@ class Game {
   update(dt, input) {
     this.bannerTimer -= dt;
     if (this.bannerTimer <= 0) this.banner = null;
+    if (this.offsideFlash) {
+      this.offsideFlash.timer -= dt;
+      if (this.offsideFlash.timer <= 0) this.offsideFlash = null;
+    }
     this.switchLock = Math.max(0, this.switchLock - dt);
 
     switch (this.state) {
@@ -317,7 +403,7 @@ class Game {
     const ax = input.axis();
     const charging = this.shootCharge >= 0 || this.crossCharge >= 0;
 
-    let speed = (hasBall ? PLAYER_CONF.DRIBBLE_SPEED : PLAYER_CONF.RUN_SPEED) * p.speedMult;
+    let speed = (hasBall ? PLAYER_CONF.DRIBBLE_SPEED : PLAYER_CONF.RUN_SPEED) * p.effSpeedMult;
     if (charging) speed *= 0.4;   // シュートを溜めている間は減速
 
     if (ax) {
@@ -446,6 +532,7 @@ class Game {
 
   // origin からパスを出す (通常のパスとワンタッチパスで共用)
   passFrom(from, origin, to, powerMul = 1) {
+    if (this.checkOffside(from, to)) { this.callOffside(from, to); return; }
     const d = dist(origin, to.pos);
     const speed = clamp(9 + d * 0.85,
       ACTION_CONF.PASS_SPEED_MIN, ACTION_CONF.PASS_SPEED_MAX) * powerMul;

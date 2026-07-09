@@ -241,12 +241,28 @@ class Renderer {
       this.drawPKView(game);
     } else {
       this.drawPitch();
+      if (game.offsideFlash) this.drawOffsideLine(game.offsideFlash);
       // 奥行き感を出すため y 順に描画
       const players = game.allPlayers().slice().sort((a, b) => a.pos.y - b.pos.y);
       for (const p of players) this.drawPlayer(p, game);
       this.drawBall(game);
     }
     this.drawHud(game);
+  }
+
+  // オフサイドが取られた瞬間、その位置に縦の点線を一瞬表示する演出
+  drawOffsideLine(flash) {
+    const ctx = this.ctx, cam = this.cam;
+    const x = cam.sx(flash.x);
+    ctx.save();
+    ctx.strokeStyle = "rgba(255,225,77,0.85)";
+    ctx.lineWidth = 3;
+    ctx.setLineDash([10, 8]);
+    ctx.beginPath();
+    ctx.moveTo(x, cam.sy(-PITCH.HALF_WID));
+    ctx.lineTo(x, cam.sy(PITCH.HALF_WID));
+    ctx.stroke();
+    ctx.restore();
   }
 
   // ---------------- ピッチ ----------------
@@ -427,6 +443,14 @@ class Renderer {
         ctx.fillStyle = "#4fc3f7";
         ctx.fillRect(x - gw / 2 + 1, y - h - 29, (gw - 2) * ratio, gh - 2);
       }
+
+      // スタミナゲージ (足元のリングの下)
+      const staminaRatio = p.stamina / STAMINA_CONF.MAX;
+      const sw = 30, sh = 4, sy = y + cell * 2 + 9;
+      ctx.fillStyle = "rgba(0,0,0,0.5)";
+      ctx.fillRect(x - sw / 2, sy, sw, sh);
+      ctx.fillStyle = staminaRatio > 0.5 ? "#7ee36a" : staminaRatio > 0.25 ? "#ff8b3d" : "#e04a3a";
+      ctx.fillRect(x - sw / 2 + 1, sy + 1, (sw - 2) * clamp(staminaRatio, 0, 1), sh - 2);
     }
   }
 
@@ -763,6 +787,16 @@ class Renderer {
     } else {
       const halfLabel = game.half === 1 ? "前半" : "後半";
       ctx.fillText(halfLabel + " " + fmtTime(game.displayTime()), W / 2 + 38, 27);
+    }
+
+    // トーナメントのラウンド表示 (トーナメントモードの試合中だけ)
+    if (game.roundLabel) {
+      ctx.fillStyle = "rgba(0,0,0,0.55)";
+      this.roundRect(ctx, W / 2 - 70, 46, 140, 20, 6);
+      ctx.fill();
+      ctx.fillStyle = "#ffe14d";
+      ctx.font = "bold 12px sans-serif";
+      ctx.fillText(game.roundLabel, W / 2, 56);
     }
 
     // 操作ガイド (攻守フェーズに応じて切替)

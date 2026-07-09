@@ -25,6 +25,13 @@
       <p id="stats-line" class="stats-line"></p>
       <div class="settings">
         <label>
+          モード
+          <select id="sel-mode">
+            <option value="single" selected>単発試合</option>
+            <option value="tournament">トーナメント (ベスト16)</option>
+          </select>
+        </label>
+        <label>
           前後半の長さ
           <select id="sel-half">
             <option value="1">各 1 分</option>
@@ -56,7 +63,10 @@
         </table>
         <p class="help-note">
           味方 GK 保持中は Z: 近くの味方へパス / X: ロングキック。<br />
-          パスが届く瞬間に Z を押すとワンタッチパス (ワンツー) になります。
+          パスが届く瞬間に Z を押すとワンタッチパス (ワンツー) になります。<br />
+          走り続けるとスタミナが減り速度が落ちます (止まると回復)。
+          無謀なスライディングはファウルを取られることがあり、
+          オフサイドも判定されます。
         </p>
       </div>
     </div>
@@ -79,6 +89,7 @@
       <h2>試合終了</h2>
       <p id="result-text" class="result-text"></p>
       <p id="result-score" class="result-score"></p>
+      <button id="btn-next-round" class="primary hidden">次のラウンドへ</button>
       <button id="btn-result-title" class="primary">タイトルへ戻る</button>
     </div>
 

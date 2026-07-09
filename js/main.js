@@ -30,12 +30,31 @@ window.addEventListener("DOMContentLoaded", () => {
   };
   const selHalf = document.getElementById("sel-half");
   const selDiff = document.getElementById("sel-diff");
+  const selMode = document.getElementById("sel-mode");
   const statsLine = document.getElementById("stats-line");
   const resultText = document.getElementById("result-text");
   const resultScore = document.getElementById("result-score");
+  const btnNextRound = document.getElementById("btn-next-round");
   const touchControls = document.getElementById("touch-controls");
   const touchBtnZ = document.getElementById("touch-btn-z");
   const touchBtnX = document.getElementById("touch-btn-x");
+
+  // トーナメントモードの進行状態。単発試合では null のまま
+  let tournament = null;
+
+  // ユーザーが実際に対戦する4ラウンド分の相手を、重複なくランダムに選ぶ
+  function createTournament() {
+    const pool = TOURNAMENT_TEAMS.slice().sort(() => Math.random() - 0.5);
+    return { round: 0, opponents: pool.slice(0, TOURNAMENT_ROUND_NAMES.length) };
+  }
+
+  function tournamentMatchOpts(t) {
+    return {
+      cpuPreset: t.opponents[t.round],
+      diffScale: TOURNAMENT_ROUND_SCALE[t.round],
+      roundLabel: "トーナメント: " + TOURNAMENT_ROUND_NAMES[t.round],
+    };
+  }
 
   // 味方 GK がボールを保持している間だけ、Z/X ボタンの表示を
   // 「ショート/ロング」キックに切替える (それ以外は常にパス・シュート/スラ表記)。
@@ -70,6 +89,7 @@ window.addEventListener("DOMContentLoaded", () => {
   function showTitle() {
     game = null;
     paused = false;
+    tournament = null;   // タイトルに戻ったら進行中のトーナメントは中断扱い
     Settings.load();
     selHalf.value = String(Settings.data.halfLengthMin);
     selDiff.value = Settings.data.difficulty;
@@ -89,6 +109,7 @@ window.addEventListener("DOMContentLoaded", () => {
     let text = `通算成績 ${r.wins}勝 ${r.losses}敗 ${r.draws}分`;
     if (r.streak > 0) text += `　現在 ${r.streak}連勝`;
     if (r.bestStreak > 1) text += ` (最高 ${r.bestStreak}連勝)`;
+    if (r.tournamentTitles > 0) text += `　🏆 優勝 ${r.tournamentTitles} 回`;
     statsLine.textContent = text;
   }
 
@@ -137,16 +158,23 @@ window.addEventListener("DOMContentLoaded", () => {
   const touchFullscreenBtn = document.getElementById("touch-fullscreen");
   if (touchFullscreenBtn) touchFullscreenBtn.addEventListener("click", toggleFullscreen);
 
-  function startMatch() {
+  function startMatch(opts) {
     requestFullscreenIfTouch();
     Settings.data.halfLengthMin = Number(selHalf.value);
     Settings.data.difficulty = selDiff.value;
     Settings.save();
-    game = new Game(Settings.data);
+    game = new Game(Object.assign({}, Settings.data, opts));
     paused = false;
     camera.pos = { x: 0, y: 0 };
     showScreen(null);
     window.__game = game;   // デバッグ/動作確認用に現在の試合状態を公開
+  }
+
+  // トーナメントの1試合を勝ち上がった/敗退したときの、成績への反映方法を
+  // 通常成績 (updateRecord) と別に管理する (優勝回数のカウント用)
+  function updateTournamentTitle() {
+    Settings.data.record.tournamentTitles++;
+    Settings.save();
   }
 
   function showResult() {
@@ -162,15 +190,47 @@ window.addEventListener("DOMContentLoaded", () => {
       lost = us < them;
     }
     resultScore.textContent = resultLine;
-    resultText.textContent = won ? (game.pk ? "PK勝利！" : "勝利！")
-      : lost ? (game.pk ? "PK敗退…" : "敗北…") : "引き分け";
     updateRecord(won, lost);
+
+    if (tournament) {
+      const roundName = TOURNAMENT_ROUND_NAMES[tournament.round];
+      if (won) {
+        tournament.round++;
+        if (tournament.round >= TOURNAMENT_ROUND_NAMES.length) {
+          resultText.textContent = "🏆 優勝!!";
+          updateTournamentTitle();
+          updateStatsLine();
+          tournament = null;
+          btnNextRound.classList.add("hidden");
+        } else {
+          resultText.textContent = roundName + " 突破!";
+          btnNextRound.textContent = TOURNAMENT_ROUND_NAMES[tournament.round] + "へ進む";
+          btnNextRound.classList.remove("hidden");
+        }
+      } else {
+        resultText.textContent = roundName + " 敗退…";
+        tournament = null;
+        btnNextRound.classList.add("hidden");
+      }
+    } else {
+      resultText.textContent = won ? (game.pk ? "PK勝利！" : "勝利！")
+        : lost ? (game.pk ? "PK敗退…" : "敗北…") : "引き分け";
+      btnNextRound.classList.add("hidden");
+    }
     showScreen("result");
   }
 
   // ---------------- ボタン ----------------
 
-  document.getElementById("btn-start").addEventListener("click", startMatch);
+  document.getElementById("btn-start").addEventListener("click", () => {
+    if (selMode.value === "tournament") {
+      tournament = createTournament();
+      startMatch(tournamentMatchOpts(tournament));
+    } else {
+      tournament = null;
+      startMatch();
+    }
+  });
   document.getElementById("btn-resume").addEventListener("click", () => {
     requestFullscreenIfTouch();
     paused = false;
@@ -183,6 +243,11 @@ window.addEventListener("DOMContentLoaded", () => {
     showScreen(null);
   });
   document.getElementById("btn-result-title").addEventListener("click", showTitle);
+  if (btnNextRound) {
+    btnNextRound.addEventListener("click", () => {
+      startMatch(tournamentMatchOpts(tournament));
+    });
+  }
 
   // ---------------- メインループ ----------------
 

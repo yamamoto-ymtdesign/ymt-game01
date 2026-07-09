@@ -26,6 +26,13 @@ class Player {
     this.goodForm = false;
     this.speedMult = rand(PLAYER_CONF.SPEED_VARIANCE_MIN, PLAYER_CONF.SPEED_VARIANCE_MAX);
 
+    // スタミナ (疲労): 走り続けると減り、動きが遅くなる。止まっていれば回復する
+    this.stamina = STAMINA_CONF.MAX;
+    this.fatigueMult = 1;
+
+    // 累積ファウル数 (スライディングタックルのみ対象。2回目以降は「警告」表示)
+    this.fouls = 0;
+
     this.pos = { x: 0, y: 0 };
     this.vel = { x: 0, y: 0 };
     this.facing = { x: team.attackDir, y: 0 };
@@ -48,6 +55,23 @@ class Player {
 
   get busy() { return this.state !== "normal"; }
   canAct() { return this.state === "normal" && this.cooldown <= 0; }
+
+  // 個体差 (speedMult) にスタミナによる疲労補正をかけた実効速度倍率
+  get effSpeedMult() { return this.speedMult * this.fatigueMult; }
+
+  // スタミナの増減。RUN_SPEED を基準にした運動強度が高いほど消費し、
+  // 低い (ほぼ静止) ときは回復する
+  updateStamina(dt) {
+    const speedRatio = vlen(this.vel) / PLAYER_CONF.RUN_SPEED;
+    if (speedRatio > 0.5) {
+      this.stamina -= STAMINA_CONF.DRAIN_RATE * speedRatio * dt;
+    } else {
+      this.stamina += STAMINA_CONF.RECOVER_RATE * (1 - speedRatio) * dt;
+    }
+    this.stamina = clamp(this.stamina, 0, STAMINA_CONF.MAX);
+    const ratio = this.stamina / STAMINA_CONF.MAX;
+    this.fatigueMult = STAMINA_CONF.MIN_MULT + (1 - STAMINA_CONF.MIN_MULT) * ratio;
+  }
 
   // ------------------------------------------------------------------
   // 物理更新 (毎フレーム、AI/ユーザー操作の後に呼ぶ)
@@ -99,6 +123,8 @@ class Player {
       -(PITCH.HALF_LEN - PITCH.MARGIN), PITCH.HALF_LEN - PITCH.MARGIN);
     this.pos.y = clamp(this.pos.y + this.vel.y * dt,
       -(PITCH.HALF_WID - PITCH.MARGIN), PITCH.HALF_WID - PITCH.MARGIN);
+
+    this.updateStamina(dt);
   }
 
   stumble(t) {
@@ -168,7 +194,10 @@ class Player {
         owner && (owner.team === this.team || (owner.isGK && owner.holdTimer > 0));
       if (!protectedBall) {
         this.slideHit = true;
-        if (owner) owner.stumble(ACTION_CONF.STUMBLE_TIME);
+        if (owner) {
+          owner.stumble(ACTION_CONF.STUMBLE_TIME);
+          if (game.maybeCallFoul(this, owner)) return;
+        }
         // 大きく蹴り出す
         const d = norm(this.slideDir.x + rand(-0.35, 0.35), this.slideDir.y + rand(-0.35, 0.35));
         ball.kick(this, d, 11);
@@ -178,6 +207,7 @@ class Player {
     for (const opp of game.opponentsOf(this.team)) {
       if (opp.state === "normal" && dist(this.pos, opp.pos) < 0.9) {
         opp.stumble(ACTION_CONF.STUMBLE_TIME);
+        if (game.maybeCallFoul(this, opp)) return;
       }
     }
   }
@@ -277,7 +307,7 @@ class Player {
     }
 
     if (this.plan && this.plan.type === "dribble") {
-      this.moveSpeed = PLAYER_CONF.DRIBBLE_SPEED * this.speedMult * diff.aiSpeed;
+      this.moveSpeed = PLAYER_CONF.DRIBBLE_SPEED * this.effSpeedMult * diff.aiSpeed;
       this.moveTarget = {
         x: this.pos.x + this.plan.dir.x * 8,
         y: this.pos.y + this.plan.dir.y * 8,
@@ -300,7 +330,7 @@ class Player {
         y: clamp(side * (PITCH.PENALTY_HALF_WIDTH + 6), -(PITCH.HALF_WID - 2), PITCH.HALF_WID - 2),
       };
       this.applySpacing(t, game);
-      this.moveSpeed = PLAYER_CONF.RUN_SPEED * this.speedMult * 0.9 * diff.aiSpeed;
+      this.moveSpeed = PLAYER_CONF.RUN_SPEED * this.effSpeedMult * 0.9 * diff.aiSpeed;
       this.moveTarget = t;
       return;
     }
@@ -311,7 +341,7 @@ class Player {
       t.x = clamp(t.x + this.team.attackDir * 6, -(PITCH.HALF_LEN - 3), PITCH.HALF_LEN - 3);
     }
     this.applySpacing(t, game);
-    this.moveSpeed = PLAYER_CONF.RUN_SPEED * this.speedMult * 0.88 * diff.aiSpeed;
+    this.moveSpeed = PLAYER_CONF.RUN_SPEED * this.effSpeedMult * 0.88 * diff.aiSpeed;
     this.moveTarget = t;
   }
 
@@ -325,7 +355,7 @@ class Player {
         ? { x: ball.owner.pos.x, y: ball.owner.pos.y }
         : { x: ball.pos.x + ball.vel.x * 0.3, y: ball.pos.y + ball.vel.y * 0.3 };
       // チェイサーはブーストして追走し、ドリブルで振り切られないようにする
-      this.moveSpeed = PLAYER_CONF.RUN_SPEED * this.speedMult * PLAYER_CONF.CHASE_BOOST * diff.aiSpeed;
+      this.moveSpeed = PLAYER_CONF.RUN_SPEED * this.effSpeedMult * PLAYER_CONF.CHASE_BOOST * diff.aiSpeed;
       this.moveTarget = target;
 
       // 近づいたら確率的にタックルを仕掛ける
@@ -337,7 +367,7 @@ class Player {
     } else {
       const t = this.formationTarget(game, -7);
       this.applySpacing(t, game);
-      this.moveSpeed = PLAYER_CONF.RUN_SPEED * this.speedMult * 0.85 * diff.aiSpeed;
+      this.moveSpeed = PLAYER_CONF.RUN_SPEED * this.effSpeedMult * 0.85 * diff.aiSpeed;
       this.moveTarget = t;
     }
   }
@@ -363,12 +393,12 @@ class Player {
       (!ball.owner || ball.owner.team !== this.team);
     if (dangerous) {
       // 飛び出してボールへ
-      this.moveSpeed = PLAYER_CONF.GK_SPEED * this.speedMult;
+      this.moveSpeed = PLAYER_CONF.GK_SPEED * this.effSpeedMult;
       this.moveTarget = { x: ball.pos.x, y: ball.pos.y };
     } else {
       // ゴールライン少し前でボールの高さに合わせて構える
       const ty = clamp(ball.pos.y * 0.35, -(PITCH.GOAL_HALF - 0.4), PITCH.GOAL_HALF - 0.4);
-      this.moveSpeed = PLAYER_CONF.GK_SPEED * this.speedMult;
+      this.moveSpeed = PLAYER_CONF.GK_SPEED * this.effSpeedMult;
       this.moveTarget = { x: goalX + dir * 1.4, y: ty };
     }
   }
