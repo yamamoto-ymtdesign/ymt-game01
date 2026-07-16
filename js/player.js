@@ -20,6 +20,9 @@ class Player {
     this.slot = slot;             // フォーメーション上の定位置 (正規化座標)
     this.role = slot.role;
     this.isGK = slot.role === "GK";
+    // サイドバック (DF のうち中央 (y=0) 以外) は、オフサイドラインが自陣
+    // ゴール前まで下がりきらないよう、センターバックより前を保つ対象にする
+    this.isSB = slot.role === "DF" && slot.y !== 0;
     this.num = num;
     // 選手ごとの速度個体差 (チーム内でランダムに 0.9〜1.1 倍)。
     // 「その日の調子」が良い選手は Team.assignForm() でさらに上書きされる
@@ -340,6 +343,7 @@ class Player {
     if (this.role === "FW") {
       t.x = clamp(t.x + this.team.attackDir * 6, -(PITCH.HALF_LEN - 3), PITCH.HALF_LEN - 3);
     }
+    this.enforceSideBackLine(t, game);
     this.applySpacing(t, game);
     this.moveSpeed = PLAYER_CONF.RUN_SPEED * this.effSpeedMult * 0.88 * diff.aiSpeed;
     this.moveTarget = t;
@@ -366,6 +370,7 @@ class Player {
       }
     } else {
       const t = this.formationTarget(game, -7);
+      this.enforceSideBackLine(t, game);
       this.applySpacing(t, game);
       this.moveSpeed = PLAYER_CONF.RUN_SPEED * this.effSpeedMult * 0.85 * diff.aiSpeed;
       this.moveTarget = t;
@@ -417,6 +422,19 @@ class Player {
     ty += (game.ball.pos.y - ty) * 0.25;   // ボールサイドへ少し寄る
 
     return { x: tx * dir, y: clamp(ty, -(PITCH.HALF_WID - 2), PITCH.HALF_WID - 2) };
+  }
+
+  // サイドバックが自陣センターバックより後ろ (自ゴールより) に下がりすぎない
+  // よう、目標位置の前後方向をセンターバックの位置基準で補正する。
+  // これによりオフサイドラインの基準となる「最終ライン」が
+  // ゴール前まで下がりきってしまうのを防ぐ
+  enforceSideBackLine(target, game) {
+    if (!this.isSB) return;
+    const cb = this.team.players.find((p) => p.role === "DF" && !p.isSB);
+    if (!cb) return;
+    const dir = this.team.attackDir;
+    const minForward = cb.pos.x * dir + PLAYER_CONF.SIDEBACK_LEAD_MIN;
+    if (target.x * dir < minForward) target.x = minForward * dir;
   }
 
   // 味方と近すぎるときは目標位置を離す (団子状態の防止)

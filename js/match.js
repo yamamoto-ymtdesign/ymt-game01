@@ -894,6 +894,15 @@ class Game {
   doRestart(label, team, pos, useGK = false) {
     this.ball.reset(pos);
 
+    // 仕切り直し: ファウルで転んだ/スライディング中だった等、選手の
+    // アクション状態をそのまま引きずって再開しない (ドリブル・接触の
+    // 続きのように見えるのを防ぎ、一度落ち着いてから再開する)
+    for (const p of this.allPlayers()) {
+      p.state = "normal";
+      p.stateTimer = 0;
+      p.vel = { x: 0, y: 0 };
+    }
+
     let taker;
     if (useGK) {
       taker = team.gk;

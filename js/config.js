@@ -60,6 +60,8 @@ const PLAYER_CONF = {
   GOOD_FORM_COUNT: 3,
   GOOD_FORM_SPEED_MIN: 1.1,
   GOOD_FORM_SPEED_MAX: 1.1,
+  // サイドバックが自陣センターバックより後ろに下がりすぎない (最低限前に出る) 距離
+  SIDEBACK_LEAD_MIN: 4,
 };
 
 // ---- スタミナ (疲労) ----
