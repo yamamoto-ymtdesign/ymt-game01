@@ -16,8 +16,9 @@ function setupTouchControls(input) {
 
   // 中心付近 (見た目のドーナツの穴部分) はニュートラル扱いにする比率。
   // ノブがこの内側に留まっている間は入力なしになるので、指が中心から
-  // 少しズレただけで意図しない方向に入ってしまうのを防げる
-  const DEADZONE_RATIO = 0.4;
+  // 少しズレただけで意図しない方向に入ってしまうのを防げる。
+  // (CSS の .touch-stick-deadzone の width/height と対応させること)
+  const DEADZONE_RATIO = 0.18;
 
   let stickTouchId = null;
   let stickCenter = { x: 0, y: 0 };
