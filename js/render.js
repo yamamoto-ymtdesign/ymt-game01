@@ -148,6 +148,27 @@ const SPRITE_GRIDS = {
     ".....LL..LL.....",
     ".....BB..BB.....",
   ],
+  // PK: GKが横っ跳びでダイブする際専用。長軸を左右 (足=左端/手=右端) に
+  // 取って描いてあり、ダイブ方向へ回転させると手から飛び込むように見える
+  // (slide は長軸が上下のため、そのまま流用すると足から飛ぶ見た目になる)
+  dive: [
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    ".........HHHH...",
+    "........HHHHHHSS",
+    "........SSSSSSSS",
+    "....JJJJJJJJJJJJ",
+    "....JJJJJJJJJJJJ",
+    "..PPPPPPPPPP....",
+    "LLLLLLLL........",
+    "BBBB............",
+    "................",
+    "................",
+    "................",
+  ],
 };
 
 const SPRITE_SIZE = 16;
@@ -470,6 +491,53 @@ class Renderer {
     else this.drawPKKickerView(game);
   }
 
+  // PK: GK がコース選択に応じてジャンプ/ダイブするときの位置・姿勢・回転を
+  // 計算する (キッカー視点の相手GK・キーパー視点の自分、共通で使う)。
+  // start/target はスクリーン座標
+  computePKGKPose(pk, start, target, diveT) {
+    const midCol = Math.floor(PK_AIM_CONF.COLS / 2);
+    const isMidLow = pk.keeperChoice.col === midCol && pk.keeperChoice.row === PK_AIM_CONF.ROWS - 1;
+    const isMidHigh = pk.keeperChoice.col === midCol && pk.keeperChoice.row === 0;
+    if (isMidLow) {
+      // 真ん中下段: 飛ばずに立ったまま止める
+      return { x: start.x, y: start.y, pose: "stand", rot: null };
+    }
+    if (isMidHigh) {
+      // 真ん中上段: その場で垂直にジャンプ
+      return { x: start.x, y: lerp(start.y, target.y, diveT), pose: "slide", rot: 0 };
+    }
+    // それ以外: 狙われた方向へ手を伸ばしてダイブする。
+    // dive スプライトは長軸が (足=左端 / 手=右端) の左右方向なので、
+    // そのままダイブ方向へ回転させれば手から飛び込むように見える
+    return {
+      x: lerp(start.x, target.x, diveT),
+      y: lerp(start.y, target.y, diveT),
+      pose: "dive",
+      rot: Math.atan2(target.y - start.y, target.x - start.x),
+    };
+  }
+
+  // PK: GK のスプライトを (x, y) を基準に描く (rot が null なら直立、
+  // それ以外は rot 分だけ回転させて描く)
+  drawPKGKSprite(x, y, rot, pose, jersey, dark, cell) {
+    const ctx = this.ctx;
+    const sprites = this.getSprites(jersey, dark, HAIR_NORMAL);
+    const w = SPRITE_SIZE * cell, h = SPRITE_SIZE * cell;
+    const img = pose === "stand" ? sprites.stand
+      : pose === "dive" ? sprites.dive
+      : sprites.slide;
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    ctx.translate(x, y);
+    if (rot !== null) {
+      ctx.rotate(rot);
+      ctx.drawImage(img, -w / 2, -h / 2, w, h);
+    } else {
+      ctx.drawImage(img, -w / 2, -h + cell * 2, w, h);
+    }
+    ctx.restore();
+  }
+
   // ゴール枠 (ネット・ポスト・3x2ゾーンの区切り線) を描く。rect のサイズで
   // キッカー視点の大きなゴールにもキーパー視点の小さな図解にも使う
   drawPKGoalFrame(rect) {
@@ -564,51 +632,18 @@ class Renderer {
 
     // GK はニュートラルなポジション (ゴール中央) に常に立っており、
     // aim フェーズ中はまだダイブしない (ease が 0 のため自然と中央に留まる)
-    // 真ん中下段は飛ばずに立ったまま止める。真ん中上段はその場で垂直にジャンプ。
-    // それ以外は狙われた方向へ体を伸ばしてダイブする
-    const midCol = Math.floor(PK_AIM_CONF.COLS / 2);
-    const isMidLow = pk.keeperChoice.col === midCol && pk.keeperChoice.row === PK_AIM_CONF.ROWS - 1;
-    const isMidHigh = pk.keeperChoice.col === midCol && pk.keeperChoice.row === 0;
-
     const gkStart = { x: W / 2, y: goalLineY - 14 };
     const gkTarget = this.pkZoneCenter(rect, pk.keeperChoice.col, pk.keeperChoice.row);
     const diveT = animT >= 1 ? ease : ease * 0.92;
+    const gkPoseInfo = this.computePKGKPose(pk, gkStart, gkTarget, diveT);
+    const gkX = gkPoseInfo.x, gkY = gkPoseInfo.y;
 
-    let gkX, gkY, gkPose, gkRot;
-    if (isMidLow) {
-      gkX = gkStart.x;
-      gkY = gkStart.y;
-      gkPose = "stand";
-      gkRot = null;
-    } else if (isMidHigh) {
-      gkX = gkStart.x;
-      gkY = lerp(gkStart.y, gkTarget.y, diveT);
-      gkPose = "slide";
-      gkRot = 0;
-    } else {
-      gkX = lerp(gkStart.x, gkTarget.x, diveT);
-      gkY = lerp(gkStart.y, gkTarget.y, diveT);
-      gkPose = "slide";
-      gkRot = Math.atan2(gkTarget.y - gkStart.y, gkTarget.x - gkStart.x) - Math.PI / 2;
-    }
-
-    // 相手GK (実際のスプライトを表示。チームのメインカラーで敵味方が分かる)
+    // 相手GK (実際のスプライトを表示。チームのメインカラーで敵味方が分かる。
+    // ゴールの大きさに対して小さすぎないよう、キーパー視点の相手キッカーと
+    // 同程度の見た目の大きさになるよう拡大してある)
     const gkJersey = pk.gk ? pk.gk.team.colors.main : "#e04a3a";
     const gkDark = pk.gk ? pk.gk.team.colors.dark : "#a03024";
-    const gkSprites = this.getSprites(gkJersey, gkDark, HAIR_NORMAL);
-    const gkCell = 2.6;
-    const gw = SPRITE_SIZE * gkCell, gh = SPRITE_SIZE * gkCell;
-    const gkImg = gkPose === "stand" ? gkSprites.stand : gkSprites.slide;
-    ctx.save();
-    ctx.imageSmoothingEnabled = false;
-    ctx.translate(gkX, gkY);
-    if (gkRot !== null) {
-      ctx.rotate(gkRot);
-      ctx.drawImage(gkImg, -gw / 2, -gh / 2, gw, gh);
-    } else {
-      ctx.drawImage(gkImg, -gw / 2, -gh + gkCell * 2, gw, gh);
-    }
-    ctx.restore();
+    this.drawPKGKSprite(gkX, gkY, gkPoseInfo.rot, gkPoseInfo.pose, gkJersey, gkDark, 5.2);
 
     // ボール (一致 = セーブなら演出後半でGK位置に吸い寄せる)
     const bx = pk.matched && animT > 0.6 ? lerp(ballX, gkX, (animT - 0.6) / 0.4) : ballX;
@@ -685,21 +720,17 @@ class Renderer {
     const ballX = lerp(ballStart.x, ballTarget.x, ease);
     const ballY = lerp(ballStart.y, ballTarget.y, ease);
 
-    // 自分 (キーパー) は rect 内でダイブ方向へ跳ぶ
+    // 自分 (キーパー) は rect 内でダイブ方向へ跳ぶ。相手GKと同じスプライト
+    // 描画にして、丸印だけでなくキャラクターとして表示する
     const selfStart = { x: rect.left + rect.w / 2, y: rect.top + rect.h - 6 };
     const selfTarget = this.pkZoneCenter(rect, pk.keeperChoice.col, pk.keeperChoice.row);
     const selfT = animT >= 1 ? ease : ease * 0.92;
-    const selfX = lerp(selfStart.x, selfTarget.x, selfT);
-    const selfY = lerp(selfStart.y, selfTarget.y, selfT);
+    const selfPoseInfo = this.computePKGKPose(pk, selfStart, selfTarget, selfT);
+    const selfX = selfPoseInfo.x, selfY = selfPoseInfo.y;
 
-    const selfColor = pk.gk ? pk.gk.team.colors.main : "#2f6fe0";
-    ctx.fillStyle = selfColor;
-    ctx.beginPath();
-    ctx.arc(selfX, selfY, 13, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = "#fff";
-    ctx.lineWidth = 2;
-    ctx.stroke();
+    const selfJersey = pk.gk ? pk.gk.team.colors.main : "#2f6fe0";
+    const selfDark = pk.gk ? pk.gk.team.colors.dark : "#1d4fa0";
+    this.drawPKGKSprite(selfX, selfY, selfPoseInfo.rot, selfPoseInfo.pose, selfJersey, selfDark, 2.8);
 
     const bx = pk.matched && animT > 0.6 ? lerp(ballX, selfX, (animT - 0.6) / 0.4) : ballX;
     const by = pk.matched && animT > 0.6 ? lerp(ballY, selfY, (animT - 0.6) / 0.4) : ballY;

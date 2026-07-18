@@ -364,6 +364,7 @@ class Player {
       const target = ball.owner
         ? { x: ball.owner.pos.x, y: ball.owner.pos.y }
         : { x: ball.pos.x + ball.vel.x * 0.3, y: ball.pos.y + ball.vel.y * 0.3 };
+      this.enforceRestartDistance(target, game);
       // チェイサーはブーストして追走し、ドリブルで振り切られないようにする
       this.moveSpeed = PLAYER_CONF.RUN_SPEED * this.effSpeedMult * PLAYER_CONF.CHASE_BOOST * diff.aiSpeed;
       this.moveTarget = target;
@@ -378,9 +379,29 @@ class Player {
       const t = this.formationTarget(game, -7);
       this.enforceSideBackLine(t, game);
       this.applySpacing(t, game);
+      this.enforceRestartDistance(t, game);
       this.moveSpeed = PLAYER_CONF.RUN_SPEED * this.effSpeedMult * 0.85 * diff.aiSpeed;
       this.moveTarget = t;
     }
+  }
+
+  // フリーキック・キックインなどのリスタート中は、相手チームの選手が
+  // 出し手 (ボール) に一定距離以上近づけないよう目標位置を押し戻す。
+  // 押し戻す方向は target ではなく自分の現在地基準で決める (target は
+  // ボール保持者=スポットそのものに向かう値のことが多く、それを基準に
+  // すると全選手が同じ1点に集まってしまうため)
+  enforceRestartDistance(target, game) {
+    if (!game.restartPassOnly) return;
+    const taker = game.restartTaker;
+    if (!taker || taker.team === this.team) return;
+    const spot = game.ball.pos;
+    const d = dist(spot, target);
+    if (d >= RESTART_KEEP_DIST) return;
+    const away = dist(spot, this.pos) > 1e-4 ? normTo(spot, this.pos) : { x: 1, y: 0 };
+    target.x = clamp(spot.x + away.x * RESTART_KEEP_DIST,
+      -(PITCH.HALF_LEN - 1), PITCH.HALF_LEN - 1);
+    target.y = clamp(spot.y + away.y * RESTART_KEEP_DIST,
+      -(PITCH.HALF_WID - 1), PITCH.HALF_WID - 1);
   }
 
   // GK: ゴール前でボールに正対し、ペナルティエリア内ではキャッチを狙う

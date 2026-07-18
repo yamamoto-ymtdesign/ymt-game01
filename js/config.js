@@ -86,6 +86,10 @@ const FOUL_CONF = {
   BEHIND_PROB: 0.55,
 };
 
+// フリーキック・キックインなどのリスタート時、相手チームの選手が
+// 出し手にこれ以上近づけない距離 (実際のルールの9.15ヤードを簡略化)
+const RESTART_KEEP_DIST = 8;
+
 // ---- アクション(パス・シュート・守備動作) ----
 const ACTION_CONF = {
   PASS_SPEED_MIN: 11,
