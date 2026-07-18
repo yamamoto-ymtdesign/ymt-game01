@@ -141,6 +141,9 @@ class Player {
   // ------------------------------------------------------------------
   tryTackle(game) {
     if (!this.canAct()) return;
+    // リスタート (ファウル/オフサイドのFK・キックイン等) の出し手がまだ
+    // ボールを離していない間は、敵味方問わずタックルを仕掛けられない
+    if (game.restartPassOnly && game.ball.owner === game.restartTaker) return;
     this.state = "tackle";
     this.stateTimer = ACTION_CONF.TACKLE_TIME;
     this.cooldown = ACTION_CONF.TACKLE_COOLDOWN;
@@ -179,6 +182,8 @@ class Player {
   // ------------------------------------------------------------------
   trySlide(game) {
     if (!this.canAct()) return;
+    // リスタートの出し手がまだボールを離していない間はスライディング不可
+    if (game.restartPassOnly && game.ball.owner === game.restartTaker) return;
     this.state = "slide";
     this.stateTimer = ACTION_CONF.SLIDE_TIME;
     this.cooldown = 1.2;
@@ -194,7 +199,8 @@ class Player {
     // 浮き球には当たり判定なし (巻き込んだ相手を転ばせる処理は別途下で継続)
     if (!ball.airborne && !this.slideHit && dist(this.pos, ball.pos) < ACTION_CONF.SLIDE_RANGE) {
       const protectedBall =
-        owner && (owner.team === this.team || (owner.isGK && owner.holdTimer > 0));
+        owner && (owner.team === this.team || (owner.isGK && owner.holdTimer > 0) ||
+          (game.restartPassOnly && owner === game.restartTaker));
       if (!protectedBall) {
         this.slideHit = true;
         if (owner) {
