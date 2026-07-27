@@ -10,7 +10,7 @@
 // 古いキャッシュは activate イベントで自動的に破棄される。
 // =====================================================================
 
-const CACHE_NAME = "ymt-soccer-v3";
+const CACHE_NAME = "ymt-soccer-v4";
 const ASSETS = [
   "./",
   "./index.html",

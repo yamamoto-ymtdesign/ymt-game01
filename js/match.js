@@ -56,6 +56,7 @@ class Game {
 
     this.controlled = null;     // ユーザーが操作中の選手
     this.switchLock = 0;        // 自動切替のロック残り時間
+    this.lastDefendOwner = null; // 直近で「相手に渡った瞬間」の切替を行った保持者
     this.shootCharge = -1;      // シュート溜め (0〜1 / -1 = 溜めていない)
     this.crossCharge = -1;      // クロス長押し (0〜HOLD_TIME / -1 = 長押ししていない)
     this.passCharge = -1;       // スルーパス長押し (0〜HOLD_TIME / -1 = 押していない)
@@ -406,11 +407,15 @@ class Game {
     // 味方の保持者は常に操作対象 (GK 保持中も含む)
     if (owner && owner.team === this.userTeam) {
       this.controlled = owner;
+      this.lastDefendOwner = null;   // 次に奪われた瞬間、また即切替できるように
       return;
     }
 
-    // 守備・ルーズボール時: 「ボールと自ゴールを結ぶ直線」の近くに居て
-    // ボールに近い味方を優先する (ボールより敵ゴール側の選手では守備できないため)
+    // ルーズボール中は次に誰かが収めた瞬間、また即切替できるようにしておく
+    if (!owner) this.lastDefendOwner = null;
+
+    // 守備・ルーズボール時: ボールより自陣側にいて、ボールに最も近い味方を
+    // 選ぶ (ボールより敵ゴール側の選手では戻って守備できないため)
     const pred = { x: ball.pos.x + ball.vel.x * 0.4, y: ball.pos.y + ball.vel.y * 0.4 };
     const cands = this.userTeam.outfield()
       .filter((p) => p.state !== "getup" && p.state !== "stumble");
@@ -434,6 +439,17 @@ class Game {
     if (!cur || cur.isGK) {
       this.controlled = best;
       this.switchLock = SWITCH_CONF.LOCK_TIME;
+      this.lastDefendOwner = owner;
+      return;
+    }
+
+    // 相手にボールが渡った瞬間だけは、ロックも無入力待ちも無視して
+    // 即座に最適な守備者へ切替える。「取られた直後に、前掛かりな選手を
+    // 操作させられて戻れない」という一番ストレスの大きい状況を防ぐ
+    if (owner && owner.team !== this.userTeam && owner !== this.lastDefendOwner) {
+      this.lastDefendOwner = owner;
+      this.controlled = best;
+      this.switchLock = SWITCH_CONF.LOCK_TIME;
       return;
     }
 
@@ -455,10 +471,15 @@ class Game {
     // いる最中に誤って切り替わらないよう、ここは純粋な距離だけで判定する
     const curBallDist = dist(cur.pos, pred);
     const farOverride = curBallDist > SWITCH_CONF.FAR_OVERRIDE_GAP;
+    // 抜かれてボールより敵陣側に置き去りにされた場合は、ロックも無入力待ちも
+    // 無視して後ろの味方へ渡す。追いつけない選手を操作させ続けるのが
+    // 守備が効かないと感じる一番の原因なので、ここは待たずに切り替える
+    const beatenOverride = this.userDefending() &&
+      (cur.pos.x - pred.x) * this.userTeam.attackDir > SWITCH_CONF.BEATEN_GAP;
     // ヒステリシス: ロック解除後・(無入力が一定フレーム続いた or 遠すぎる)後、
     // かつ十分な差があるときだけ切替える (操作中の横取り防止)
-    if (this.switchLock <= 0 &&
-        (this.inputIdleFrames >= SWITCH_CONF.IDLE_FRAMES || farOverride) &&
+    if ((this.switchLock <= 0 || beatenOverride) &&
+        (this.inputIdleFrames >= SWITCH_CONF.IDLE_FRAMES || farOverride || beatenOverride) &&
         (bestS < curS * SWITCH_CONF.RATIO || curS - bestS > SWITCH_CONF.ABS_GAP)) {
       this.controlled = best;
       this.switchLock = SWITCH_CONF.LOCK_TIME;
@@ -466,22 +487,19 @@ class Game {
   }
 
   // 守備時の切替優先度 (小さいほど優先)。
-  // ボールへの距離・「ボール → 自ゴール」線への整列に加えて、
-  // ピッチの前後方向 (attackDir 軸) でボールより敵陣側 (前) にいる選手を
-  // その分だけ大きく減点する。左右にどれだけずれていても、ボールより
-  // 前にいる選手は守備に間に合わないため、確実に選ばれにくくする。
+  // 「ボールより自陣側 (自ゴール寄り) にいる選手のうち、ボールに最も近い者」
+  // を選ぶ。自陣側の選手はスコアがそのままボールへの距離になるので、
+  // 迷いなく一番近い守備者が選ばれる。ボールより前に出ている選手は
+  // 追いかけても間に合わないため、ピッチ全長を超える固定ペナルティを科して
+  // 自陣側の候補より必ず後回しにする (自陣側が誰も居なければその中で
+  // 前に出ている量が少ない順に選ばれる)。
   defensiveScore(p, ballPos) {
     const dir = this.userTeam.attackDir;
-    const ownGoal = { x: -dir * PITCH.HALF_LEN, y: 0 };
     const dBall = dist(p.pos, ballPos);
-    const lineDist = pointSegDist(p.pos, ballPos, ownGoal);
-    // + ならボールより敵陣側 (前)。守備に回れないので大きな固定ペナルティ +
-    // 距離に比例した追加ペナルティを科し、単純な距離の近さで選ばれないようにする
-    const aheadOfBall = (p.pos.x - ballPos.x) * dir;
-    const aheadPenalty = aheadOfBall > 0
-      ? SWITCH_CONF.AHEAD_BASE_PENALTY + aheadOfBall * SWITCH_CONF.AHEAD_PENALTY
-      : 0;
-    return dBall + lineDist * 0.8 + aheadPenalty;
+    // + ならボールより敵陣側 (前)。並んでいる程度は自陣側として扱う
+    const aheadOfBall = (p.pos.x - ballPos.x) * dir - SWITCH_CONF.GOALSIDE_TOLERANCE;
+    if (aheadOfBall <= 0) return dBall;
+    return dBall + SWITCH_CONF.AHEAD_BASE_PENALTY + aheadOfBall * SWITCH_CONF.AHEAD_PENALTY;
   }
 
   // ---------------- ユーザー操作 ----------------
