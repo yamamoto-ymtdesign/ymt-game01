@@ -187,7 +187,19 @@ class Camera {
   constructor(canvas) {
     this.canvas = canvas;
     this.pos = { x: 0, y: 0 };
-    this.scale = 12;   // 1m あたりのピクセル数 (960x540 → 80m x 45m を表示)
+    this.scale = FX_CONF.ZOOM_BASE;   // 1m あたりのピクセル数
+    this.shakeX = 0;
+    this.shakeY = 0;
+  }
+
+  // どちらかのゴールに近いほど寄る (ゴール前の緊張感を出す)
+  targetScale(game) {
+    const b = game.ball.pos;
+    const dGoal = Math.min(
+      Math.hypot(PITCH.HALF_LEN - b.x, b.y),
+      Math.hypot(-PITCH.HALF_LEN - b.x, b.y));
+    const t = clamp((FX_CONF.ZOOM_FAR - dGoal) / (FX_CONF.ZOOM_FAR - FX_CONF.ZOOM_NEAR), 0, 1);
+    return FX_CONF.ZOOM_BASE + (FX_CONF.ZOOM_MAX - FX_CONF.ZOOM_BASE) * t;
   }
 
   update(dt, game) {
@@ -198,6 +210,15 @@ class Camera {
     this.pos.x += (target.x - this.pos.x) * k;
     this.pos.y += (target.y - this.pos.y) * k;
 
+    // ズームを滑らかに追従させる
+    const zk = 1 - Math.exp(-FX_CONF.ZOOM_LERP * dt);
+    this.scale += (this.targetScale(game) - this.scale) * zk;
+
+    // 画面シェイク: 強度に応じてランダムなオフセットを毎フレーム作る
+    const s = game.shake || 0;
+    this.shakeX = s > 0.1 ? rand(-s, s) : 0;
+    this.shakeY = s > 0.1 ? rand(-s, s) : 0;
+
     // ピッチ外を映しすぎないようにクランプ
     const hw = this.canvas.width / 2 / this.scale;
     const hh = this.canvas.height / 2 / this.scale;
@@ -207,8 +228,8 @@ class Camera {
     this.pos.y = clamp(this.pos.y, -my, my);
   }
 
-  sx(x) { return (x - this.pos.x) * this.scale + this.canvas.width / 2; }
-  sy(y) { return (y - this.pos.y) * this.scale + this.canvas.height / 2; }
+  sx(x) { return (x - this.pos.x) * this.scale + this.canvas.width / 2 + this.shakeX; }
+  sy(y) { return (y - this.pos.y) * this.scale + this.canvas.height / 2 + this.shakeY; }
 }
 
 class Renderer {
@@ -253,22 +274,50 @@ class Renderer {
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     if (!game) { this.drawPitch(); return; }
 
-    // PK戦のコース選択〜演出中は、通常のピッチ俯瞰の代わりにキッカー
+    // PK戦・1対1 のコース選択〜演出中は、通常のピッチ俯瞰の代わりに
     // 1人称視点のゴール正面ビューを描く (配置直後の setup フェーズだけは
     // 通常のピッチで選手の並びを見せる)
-    const inPKView = game.state === "pk_done" ||
-      (game.state === "pk" && game.pk && game.pk.phase !== "setup");
-    if (inPKView) {
-      this.drawPKView(game);
+    const duel = this.activeDuel(game);
+    if (duel) {
+      this.drawDuelView(game, duel);
     } else {
       this.drawPitch();
       if (game.offsideFlash) this.drawOffsideLine(game.offsideFlash);
+      this.drawPassMarker(game);   // 選手より下に敷いて視界を邪魔しない
       // 奥行き感を出すため y 順に描画
       const players = game.allPlayers().slice().sort((a, b) => a.pos.y - b.pos.y);
       for (const p of players) this.drawPlayer(p, game);
       this.drawBall(game);
+      this.drawZoneOverlay(game);
     }
     this.drawHud(game);
+  }
+
+  // 今 1人称ビューで描くべき読み合い (PK or 1対1) を返す。無ければ null
+  activeDuel(game) {
+    if (game.state === "breakaway" && game.breakaway &&
+        game.breakaway.phase !== "setup") {
+      return game.breakaway;
+    }
+    if (game.state === "pk_done") return game.pk;
+    if (game.state === "pk" && game.pk && game.pk.phase !== "setup") return game.pk;
+    return null;
+  }
+
+  // ゾーン発動中は画面の縁をチームカラーで光らせる
+  drawZoneOverlay(game) {
+    const team = game.teams.find((t) => t.inZone);
+    if (!team) return;
+    const ctx = this.ctx, W = this.canvas.width, H = this.canvas.height;
+    const pulse = 0.55 + 0.45 * Math.sin(this.now / 180);
+    const grad = ctx.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, H * 0.85);
+    grad.addColorStop(0, "rgba(0,0,0,0)");
+    grad.addColorStop(1, team.colors.main);
+    ctx.save();
+    ctx.globalAlpha = 0.3 * pulse;
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
   }
 
   // オフサイドが取られた瞬間、その位置に縦の点線を一瞬表示する演出
@@ -463,16 +512,86 @@ class Renderer {
         ctx.fillRect(x - gw / 2, y - h - 30, gw, gh);
         ctx.fillStyle = "#4fc3f7";
         ctx.fillRect(x - gw / 2 + 1, y - h - 29, (gw - 2) * ratio, gh - 2);
+      } else if (game.passCharge >= 0) {
+        // スルーパスの長押しゲージ (満タンでスルーパスが出る)
+        const gw = 44, gh = 7;
+        const ratio = clamp(game.passCharge / THROUGH_CONF.HOLD_TIME, 0, 1);
+        ctx.fillStyle = "rgba(0,0,0,0.55)";
+        ctx.fillRect(x - gw / 2, y - h - 30, gw, gh);
+        ctx.fillStyle = "#b98bff";
+        ctx.fillRect(x - gw / 2 + 1, y - h - 29, (gw - 2) * ratio, gh - 2);
       }
 
-      // スタミナゲージ (足元のリングの下)
+      // スタミナゲージ (足元のリングの下)。スプリント中は枠を光らせる
       const staminaRatio = p.stamina / STAMINA_CONF.MAX;
       const sw = 30, sh = 4, sy = y + cell * 2 + 9;
       ctx.fillStyle = "rgba(0,0,0,0.5)";
       ctx.fillRect(x - sw / 2, sy, sw, sh);
       ctx.fillStyle = staminaRatio > 0.5 ? "#7ee36a" : staminaRatio > 0.25 ? "#ff8b3d" : "#e04a3a";
       ctx.fillRect(x - sw / 2 + 1, sy + 1, (sw - 2) * clamp(staminaRatio, 0, 1), sh - 2);
+      if (p.sprinting) {
+        ctx.strokeStyle = "#ffe14d";
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(x - sw / 2 - 1, sy - 1, sw + 2, sh + 2);
+      }
     }
+
+    // スプリント中は足元に砂煙 (誰でも。加速しているのが一目で分かる)
+    if (p.sprinting && vlen(p.vel) > 2) {
+      const back = norm(-p.vel.x, -p.vel.y);
+      ctx.fillStyle = "rgba(255,255,255,0.28)";
+      for (let i = 1; i <= 2; i++) {
+        const d = cell * 3 * i;
+        ctx.beginPath();
+        ctx.arc(x + back.x * d, y + cell * 2 + back.y * d, cell * (2.2 - i * 0.6), 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  // 今 Z を押したらパスが行く味方を指すマーカー。長押し中は
+  // スルーパスの落とし所まで矢印を伸ばして予告する
+  drawPassMarker(game) {
+    const target = game.passTarget;
+    if (!target || !game.controlled) return;
+    const ctx = this.ctx, cam = this.cam, s = cam.scale;
+    const tx = cam.sx(target.pos.x), ty = cam.sy(target.pos.y);
+    const charging = game.passCharge >= 0;
+    const ratio = charging ? clamp(game.passCharge / THROUGH_CONF.HOLD_TIME, 0, 1) : 0;
+    const color = charging ? "#b98bff" : "#ffe14d";
+
+    // 受け手の足元のリング
+    const pulse = 0.6 + 0.4 * Math.sin(this.now / 160);
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = charging ? 1 : 0.55 + 0.35 * pulse;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(tx, ty + s * 0.25, s * 0.62, s * 0.34, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    // 長押し中: スルーパスの落とし所へ伸びる矢印 (溜まるほど伸びる)
+    if (charging) {
+      const spot = game.throughSpot(game.controlled, target);
+      const sx2 = cam.sx(spot.x), sy2 = cam.sy(spot.y);
+      const ex = tx + (sx2 - tx) * ratio, ey = ty + (sy2 - ty) * ratio;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 3;
+      ctx.setLineDash([7, 5]);
+      ctx.beginPath();
+      ctx.moveTo(tx, ty);
+      ctx.lineTo(ex, ey);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      if (ratio > 0.15) {
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(ex, ey, 5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
   }
 
   // ---------------- PK戦: 1人称視点ビュー ----------------
@@ -486,9 +605,10 @@ class Renderer {
     return { x: rect.left + cw * (col + 0.5), y: rect.top + ch * (row + 0.5) };
   }
 
-  drawPKView(game) {
-    if (game.pk.keeperIsUser) this.drawPKKeeperView(game);
-    else this.drawPKKickerView(game);
+  // PK戦・1対1 で共通の1人称ビュー。duel は phase/choice/shooter/gk を持つ
+  drawDuelView(game, duel) {
+    if (duel.keeperIsUser) this.drawPKKeeperView(game, duel);
+    else this.drawPKKickerView(game, duel);
   }
 
   // PK: GK がコース選択に応じてジャンプ/ダイブするときの位置・姿勢・回転を
@@ -581,10 +701,10 @@ class Renderer {
   }
 
   // 残り時間バー (aim フェーズ中だけ表示)
-  drawPKTimer(game, x, y, w) {
-    const ctx = this.ctx, pk = game.pk;
-    if (pk.phase !== "aim") return;
-    const ratio = clamp(pk.timer / PK_AIM_CONF.AIM_TIME, 0, 1);
+  drawPKTimer(duel, x, y, w) {
+    const ctx = this.ctx;
+    if (duel.phase !== "aim") return;
+    const ratio = clamp(duel.timer / (duel.aimTotal || PK_AIM_CONF.AIM_TIME), 0, 1);
     ctx.fillStyle = "rgba(0,0,0,0.5)";
     ctx.fillRect(x, y, w, 8);
     ctx.fillStyle = ratio < 0.3 ? "#ff8b3d" : "#7ee36a";
@@ -592,9 +712,8 @@ class Renderer {
   }
 
   // ---- キッカー視点: ゴール正面から相手GKと対峙する ----
-  drawPKKickerView(game) {
+  drawPKKickerView(game, pk) {
     const ctx = this.ctx, W = this.canvas.width, H = this.canvas.height;
-    const pk = game.pk;
 
     const sky = ctx.createLinearGradient(0, 0, 0, H);
     sky.addColorStop(0, "#274b6b");
@@ -616,12 +735,12 @@ class Renderer {
       } else {
         this.drawPKCursor(rect, pk.kickerChoice, "rgba(255,225,77,0.18)", "rgba(255,225,77,0.6)");
       }
-      this.drawPKTimer(game, W / 2 - 90, rect.top - 22, 180);
+      this.drawPKTimer(pk, W / 2 - 90, rect.top - 22, 180);
     }
 
     // シュート/セーブのアニメーション (anim/result フェーズで進行度 1 まで進む)
     const animT = pk.phase === "anim"
-      ? clamp(1 - pk.timer / PK_AIM_CONF.ANIM_TIME, 0, 1)
+      ? clamp(1 - pk.timer / (pk.animTotal || PK_AIM_CONF.ANIM_TIME), 0, 1)
       : (pk.phase === "result" ? 1 : 0);
     const ease = animT * (2 - animT);
 
@@ -659,9 +778,8 @@ class Renderer {
   }
 
   // ---- キーパー視点: 相手キッカーを正面に見て、ダイブ方向を選ぶ ----
-  drawPKKeeperView(game) {
+  drawPKKeeperView(game, pk) {
     const ctx = this.ctx, W = this.canvas.width, H = this.canvas.height;
-    const pk = game.pk;
 
     const sky = ctx.createLinearGradient(0, 0, 0, H);
     sky.addColorStop(0, "#274b6b");
@@ -706,11 +824,11 @@ class Renderer {
       } else {
         this.drawPKCursor(rect, pk.keeperChoice, "rgba(79,195,247,0.18)", "rgba(79,195,247,0.6)");
       }
-      this.drawPKTimer(game, W / 2 - 90, rect.top - 22, 180);
+      this.drawPKTimer(pk, W / 2 - 90, rect.top - 22, 180);
     }
 
     const animT = pk.phase === "anim"
-      ? clamp(1 - pk.timer / PK_AIM_CONF.ANIM_TIME, 0, 1)
+      ? clamp(1 - pk.timer / (pk.animTotal || PK_AIM_CONF.ANIM_TIME), 0, 1)
       : (pk.phase === "result" ? 1 : 0);
     const ease = animT * (2 - animT);
 
@@ -796,29 +914,41 @@ class Renderer {
     const ctx = this.ctx;
     const W = this.canvas.width;
 
-    // スコアボード
+    // スコアボード (ロスタイム表示が入ると横に伸びるので、その分だけ広げる)
+    const inPK = game.state === "pk" || game.state === "pk_done";
+    const extra = game.stoppageElapsed();
+    const wide = !inPK && extra > 0;
+    const boxW = wide ? 430 : 350;
+    const nameX = wide ? 155 : 110;
+    const scoreX = wide ? -55 : -40;
+    const infoX = wide ? 45 : 38;
+
     ctx.fillStyle = "rgba(0,0,0,0.6)";
-    this.roundRect(ctx, W / 2 - 175, 10, 350, 34, 8);
+    this.roundRect(ctx, W / 2 - boxW / 2, 10, boxW, 34, 8);
     ctx.fill();
 
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.font = "bold 17px sans-serif";
     ctx.fillStyle = game.userTeam.colors.main;
-    ctx.fillText(game.userTeam.name, W / 2 - 110, 27);
+    ctx.fillText(game.userTeam.name, W / 2 - nameX, 27);
     ctx.fillStyle = game.cpuTeam.colors.main;
-    ctx.fillText(game.cpuTeam.name, W / 2 + 110, 27);
+    ctx.fillText(game.cpuTeam.name, W / 2 + nameX, 27);
     ctx.fillStyle = "#fff";
-    const inPK = game.state === "pk" || game.state === "pk_done";
-    ctx.fillText(game.score[0] + " - " + game.score[1], W / 2 - 40, 27);
+    ctx.fillText(game.score[0] + " - " + game.score[1], W / 2 + scoreX, 27);
     ctx.fillStyle = "#ffe14d";
     ctx.font = "bold 15px sans-serif";
     if (inPK && game.pk) {
-      ctx.fillText("PK " + game.pk.userScore + " - " + game.pk.cpuScore, W / 2 + 42, 27);
+      ctx.fillText("PK " + game.pk.userScore + " - " + game.pk.cpuScore, W / 2 + infoX, 27);
     } else {
       const halfLabel = game.half === 1 ? "前半" : "後半";
-      ctx.fillText(halfLabel + " " + fmtTime(game.displayTime()), W / 2 + 38, 27);
+      let timeText = halfLabel + " " + fmtTime(game.displayTime());
+      // ロスタイム中は「+1:23」を追記して、まだ終わっていないことを示す
+      if (extra > 0) timeText += "  +" + fmtTime(extra).replace(/^0/, "");
+      ctx.fillText(timeText, W / 2 + infoX, 27);
     }
+
+    this.drawMomentum(game);
 
     // トーナメントのラウンド表示 (トーナメントモードの試合中だけ)
     if (game.roundLabel) {
@@ -844,14 +974,18 @@ class Renderer {
           game.volley.passActive ? "Z: ワンタッチパス!!" : null,
         ].filter(Boolean).join("   ")
       : null;
-    const guide = inPK
-      ? (game.pk && game.pk.phase === "aim"
-          ? (game.pk.kickerIsUser && !game.pk.kickerConfirmed
+    // PK / 1対1 の読み合い中は、どちらの役かに応じたガイドを出す
+    const duel = (game.state === "breakaway" && game.breakaway) ? game.breakaway
+      : (inPK ? game.pk : null);
+    const duelLabel = game.state === "breakaway" ? "1対1" : "PK戦";
+    const guide = duel
+      ? (duel.phase === "aim"
+          ? (duel.kickerIsUser && !duel.kickerConfirmed
               ? "矢印: コースを選ぶ (左右/上下)   X: 決定"
-              : game.pk.keeperIsUser && !game.pk.keeperConfirmed
+              : duel.keeperIsUser && !duel.keeperConfirmed
               ? "矢印: 飛ぶ方向を選ぶ (左右/上下)   X: 決定"
               : "コース決定を待っています…")
-          : "PK戦")
+          : duelLabel)
       : volleyHint
       ? volleyHint
       : gkHolding
@@ -860,9 +994,9 @@ class Renderer {
       ? "矢印: 向き変更   Z: パス (リスタートはパスのみ)"
       : !game.userDefending()
       ? (inCrossZone
-          ? "矢印: ドリブル   Z長押し: クロス   X(長押し): シュート"
-          : "矢印: ドリブル   Z: パス   X(長押し): シュート")
-      : "矢印: 移動   Z/X: スライディング   Space: 選手切替";
+          ? "矢印: ドリブル   Shift: スプリント   Z長押し: クロス   X(長押し): シュート"
+          : "矢印: ドリブル   Shift: スプリント   Z: パス / 長押し: スルーパス   X(長押し): シュート")
+      : "矢印: 移動   Shift: スプリント   Z/X: スライディング   Space: 選手切替";
     ctx.fillStyle = "rgba(0,0,0,0.55)";
     this.roundRect(ctx, 10, this.canvas.height - 34, 620, 24, 6);
     ctx.fill();
@@ -882,6 +1016,43 @@ class Renderer {
       ctx.textAlign = "center";
       ctx.fillText(game.banner, W / 2, this.canvas.height / 2);
     }
+  }
+
+  // モメンタム (ノリ) ゲージ: 画面左上に両チーム分を縦に並べる。
+  // ゾーン中はゲージ全体が脈打ち、残り時間バーに切り替わる
+  drawMomentum(game) {
+    const ctx = this.ctx;
+    const gw = 150, gh = 11, ox = 12, oy = 12;
+    game.teams.forEach((team, i) => {
+      const y = oy + i * (gh + 7);
+      const inZone = team.inZone;
+      const ratio = inZone
+        ? team.zoneTimer / MOMENTUM_CONF.ZONE_TIME
+        : team.momentum / MOMENTUM_CONF.MAX;
+
+      ctx.fillStyle = "rgba(0,0,0,0.55)";
+      this.roundRect(ctx, ox, y, gw, gh, 4);
+      ctx.fill();
+
+      if (inZone) {
+        const pulse = 0.6 + 0.4 * Math.sin(this.now / 90);
+        ctx.save();
+        ctx.globalAlpha = pulse;
+        ctx.fillStyle = "#ffe14d";
+        ctx.fillRect(ox + 1.5, y + 1.5, (gw - 3) * clamp(ratio, 0, 1), gh - 3);
+        ctx.restore();
+      } else {
+        ctx.fillStyle = team.colors.main;
+        ctx.fillRect(ox + 1.5, y + 1.5, (gw - 3) * clamp(ratio, 0, 1), gh - 3);
+      }
+
+      ctx.font = "bold 10px sans-serif";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = inZone ? "#ffe14d" : "rgba(255,255,255,0.9)";
+      ctx.fillText(inZone ? "⚡ " + team.name + " ZONE" : team.name, ox + gw + 7, y + gh / 2);
+    });
+    ctx.textBaseline = "alphabetic";
   }
 
   // ミニマップ (右下): 全体の陣形が分かるレーダー

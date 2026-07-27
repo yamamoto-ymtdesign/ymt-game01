@@ -14,6 +14,34 @@ class Team {
     this.players = FORMATION_9.map((slot, i) => new Player(this, slot, i + 1));
     this.gk = this.players[0];
     this.assignForm();
+
+    // モメンタム (ノリ): 好プレーで溜まり、満タンで「ゾーン」に突入する
+    this.momentum = 0;
+    this.zoneTimer = 0;
+    this.zoneJustStarted = false;   // 発動した瞬間だけ true (演出のトリガー)
+  }
+
+  get inZone() { return this.zoneTimer > 0; }
+
+  // モメンタムを増減する。満タンに達した瞬間ゾーンが発動し、ゲージは空になる
+  addMomentum(n) {
+    if (this.zoneTimer > 0) return;   // ゾーン中は溜め直さない
+    this.momentum = clamp(this.momentum + n, 0, MOMENTUM_CONF.MAX);
+    if (this.momentum >= MOMENTUM_CONF.MAX) {
+      this.momentum = 0;
+      this.zoneTimer = MOMENTUM_CONF.ZONE_TIME;
+      this.zoneJustStarted = true;
+    }
+  }
+
+  // hasPossession: このチームがボールを保持しているか。
+  // 保持している間はゲージが減らない (攻撃を組み立てる時間を与える)
+  updateMomentum(dt, hasPossession) {
+    if (this.zoneTimer > 0) {
+      this.zoneTimer = Math.max(0, this.zoneTimer - dt);
+    } else if (this.momentum > 0 && !hasPossession) {
+      this.momentum = Math.max(0, this.momentum - MOMENTUM_CONF.DECAY * dt);
+    }
   }
 
   // その日の調子: チームからランダムに最大 GOOD_FORM_COUNT 人を「絶好調」にし、

@@ -288,6 +288,12 @@ button.primary:hover {
   transition: none;
 }
 
+/* 外周まで倒し込んだ状態 = スプリント中。色で分かるようにする */
+.touch-stick-knob.sprinting {
+  background: rgba(255, 225, 77, 0.85);
+  box-shadow: 0 0 12px rgba(255, 225, 77, 0.7);
+}
+
 /* 中心のニュートラル範囲 (js/touch.js の DEADZONE_RATIO と対応する見た目のドーナツの穴)。
    % 指定なので画面幅ブレークポイントで .touch-stick-base が縮んでも自動的に追従する */
 .touch-stick-deadzone {

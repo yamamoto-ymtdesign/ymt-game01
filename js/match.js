@@ -58,6 +58,8 @@ class Game {
     this.switchLock = 0;        // 自動切替のロック残り時間
     this.shootCharge = -1;      // シュート溜め (0〜1 / -1 = 溜めていない)
     this.crossCharge = -1;      // クロス長押し (0〜HOLD_TIME / -1 = 長押ししていない)
+    this.passCharge = -1;       // スルーパス長押し (0〜HOLD_TIME / -1 = 押していない)
+    this.passTarget = null;     // 今 Z を離したらパスが行く相手 (マーカー描画用)
     this.pendingKickoffTeam = null;
     this.volley = null;         // ダイレクトシュートの状態 {active, failed}
     this.restartPassOnly = false; // リスタート(キックイン等)はパス以外禁止
@@ -66,7 +68,41 @@ class Game {
     this.pk = null;               // PK戦の状態 (試合が同点で終わったときだけ生成)
     this.offsideFlash = null;     // オフサイドライン表示演出 {x, timer}
 
+    // モメンタム: 直前のパスの種類 (加点の重み付けに使う)
+    this.pendingPassKind = null;
+
+    // 1対1 (ブレイクアウェイ)
+    this.breakaway = null;
+    this.breakawayCooldown = BREAKAWAY_CONF.COOLDOWN * 0.5;
+
+    // 演出 (画面効果)
+    this.shake = 0;               // 画面シェイクの残り強度
+    this.hitstop = 0;             // 画面を止めている残り時間 (実時間)
+    this.slowmo = 0;              // スローモーの残り時間 (実時間)
+    this.stoppage = this.rollStoppage();   // 前半のアディショナルタイム(秒)
+    this.stoppageShown = false;
+
     this.setupKickoff(this.userTeam, "キックオフ");
+  }
+
+  // アディショナルタイム (ロスタイム) の長さを抽選する
+  rollStoppage() {
+    return rand(STOPPAGE_CONF.MIN, STOPPAGE_CONF.MAX);
+  }
+
+  // ---------------- 演出ヘルパー ----------------
+
+  addShake(power) { this.shake = Math.max(this.shake, power); }
+  addHitstop(t) { this.hitstop = Math.max(this.hitstop, t); }
+  addSlowmo(t) { this.slowmo = Math.max(this.slowmo, t); }
+
+  // 終盤 (ロスタイム含む残り SLOWMO_LAST_SEC 秒以内) の枠内シュートで
+  // 一瞬スローモーにする
+  maybeDramaSlowmo() {
+    const remain = this.halfLength + this.stoppage - this.time;
+    if (this.half === 2 && remain <= FX_CONF.SLOWMO_LAST_SEC && remain > 0) {
+      this.addSlowmo(FX_CONF.SLOWMO_TIME);
+    }
   }
 
   // 難易度プリセットを scale 倍だけ強く (弱く) した新しいオブジェクトを返す。
@@ -126,14 +162,53 @@ class Game {
     this.freezeTimer = t;
     this.shootCharge = -1;
     this.crossCharge = -1;
+    this.passCharge = -1;
+    this.passTarget = null;
     if (text) this.showBanner(text, Math.max(t, 1.2));
   }
 
   givePossession(p) {
+    const prev = this.ball.lastTouchTeam;
     this.ball.setOwner(p);
     if (p.isGK) p.holdTimer = 1.3;
     // 味方GKが保持した場合も操作キャラにする (ロングキック/パスを選べるようにする)
     if (p.team.isUser) this.controlled = p;
+    this.onPossession(p, prev);
+  }
+
+  // ---------------- モメンタム (ノリ) ----------------
+
+  // ボールを収めた瞬間に呼ばれ、モメンタムを増減する。
+  // 直前に自分のチームが触っていれば「パス成功」、相手が触っていれば
+  // 「奪取」として扱い、奪われた側は減点する
+  onPossession(p, prevTouchTeam) {
+    if (!prevTouchTeam) return;
+    if (prevTouchTeam === p.team) {
+      // 味方から味方へ渡った = パス成功。種類に応じて加点を変える
+      const kind = this.pendingPassKind;
+      const gain = kind === "through" ? MOMENTUM_CONF.GAIN.through
+        : kind === "cross" ? MOMENTUM_CONF.GAIN.cross
+        : kind === "oneTouch" ? MOMENTUM_CONF.GAIN.oneTouch
+        : MOMENTUM_CONF.GAIN.pass;
+      p.team.addMomentum(gain);
+    } else {
+      // 相手ボールを奪った
+      p.team.addMomentum(MOMENTUM_CONF.GAIN.tackle);
+      prevTouchTeam.addMomentum(-MOMENTUM_CONF.LOSS.turnover);
+    }
+    this.pendingPassKind = null;
+  }
+
+  updateMomentum(dt) {
+    const owner = this.ball.owner;
+    for (const t of this.teams) {
+      t.updateMomentum(dt, !!owner && owner.team === t);
+      if (t.zoneJustStarted) {
+        t.zoneJustStarted = false;
+        this.showBanner("⚡ " + t.name + " ゾーン発動!", 1.8);
+        this.addShake(FX_CONF.SHAKE_POST);
+      }
+    }
   }
 
   // ---------------- ファウル (軽量版: スライディングのみ対象) ----------------
@@ -209,6 +284,8 @@ class Game {
   startSecondHalf() {
     this.half = 2;
     this.time = 0;
+    this.stoppage = this.rollStoppage();   // 後半のロスタイムを引き直す
+    this.stoppageShown = false;
     for (const t of this.teams) t.attackDir *= -1;
     // ハーフタイムでスタミナを少しだけ回復させる (完全回復はしない)
     for (const p of this.allPlayers()) {
@@ -217,14 +294,30 @@ class Game {
     this.setupKickoff(this.cpuTeam, "後半キックオフ");
   }
 
-  // 表示用: 試合開始からの通算時間
+  // 表示用: 試合開始からの通算時間 (ロスタイム分は halfLength で頭打ちにし、
+  // 「45+2」のように別建てで見せる)
   displayTime() {
     return (this.half - 1) * this.halfLength + Math.min(this.time, this.halfLength);
   }
 
+  // ロスタイムに入っていれば、その経過秒数を返す (入っていなければ 0)
+  stoppageElapsed() {
+    return Math.max(0, this.time - this.halfLength);
+  }
+
   // ---------------- メイン更新 ----------------
 
-  update(dt, input) {
+  update(dtReal, input) {
+    // --- 演出タイマーは実時間で進める (ヒットストップ/スローモーの影響を受けない) ---
+    this.shake = Math.max(0, this.shake - FX_CONF.SHAKE_DECAY * dtReal);
+    if (this.hitstop > 0) {
+      // ヒットストップ中はゲーム内時間を完全に止める (画面だけ描画され続ける)
+      this.hitstop = Math.max(0, this.hitstop - dtReal);
+      return;
+    }
+    if (this.slowmo > 0) this.slowmo = Math.max(0, this.slowmo - dtReal);
+    const dt = this.slowmo > 0 ? dtReal * FX_CONF.SLOWMO_SCALE : dtReal;
+
     this.bannerTimer -= dt;
     if (this.bannerTimer <= 0) this.banner = null;
     if (this.offsideFlash) {
@@ -232,6 +325,8 @@ class Game {
       if (this.offsideFlash.timer <= 0) this.offsideFlash = null;
     }
     this.switchLock = Math.max(0, this.switchLock - dt);
+    this.breakawayCooldown = Math.max(0, this.breakawayCooldown - dt);
+    this.updateMomentum(dt);
 
     switch (this.state) {
       case "freeze":
@@ -244,9 +339,14 @@ class Game {
           this.setupKickoff(this.pendingKickoffTeam, "キックオフ");
         }
         break;
-      case "playing":
+      case "playing": {
         this.time += dt;
-        if (this.time >= this.halfLength) {
+        // アディショナルタイム (ロスタイム) に入った瞬間だけ告知する
+        if (!this.stoppageShown && this.time >= this.halfLength) {
+          this.stoppageShown = true;
+          this.showBanner("+" + Math.ceil(this.stoppage / 60) + " アディショナルタイム", 2.2);
+        }
+        if (this.time >= this.halfLength + this.stoppage) {
           if (this.half === 1) { this.state = "halftime"; return; }
           // 後半終了時に同点なら PK 戦へ。それ以外はそのまま試合終了
           if (this.score[0] === this.score[1]) { this.startPK(); return; }
@@ -254,6 +354,10 @@ class Game {
           return;
         }
         this.updatePlay(dt, input);
+        break;
+      }
+      case "breakaway":
+        this.updateBreakaway(dt, input);
         break;
       case "pk":
         this.updatePK(dt, input);
@@ -292,6 +396,7 @@ class Game {
     this.ball.update(dt);
     if (!this.ball.owner) this.tryPickups();
     this.checkGoalAndOut();
+    if (this.state === "playing") this.checkBreakaway();
   }
 
   // ---------------- 操作キャラの自動切替 ----------------
@@ -397,14 +502,22 @@ class Game {
     if (p.busy) {
       if (this.shootCharge >= 0) this.shootCharge = -1;
       if (this.crossCharge >= 0) this.crossCharge = -1;
+      if (this.passCharge >= 0) this.passCharge = -1;
+      this.passTarget = null;
       return;
     }
 
     const ax = input.axis();
     const charging = this.shootCharge >= 0 || this.crossCharge >= 0;
 
+    // スプリント: 溜め中とリスタートの出し手は不可 (その場で構える動作のため)
+    p.sprinting = input.isSprinting() && !charging && !this.restartPassOnly &&
+      ax !== null && p.canSprint();
+
     let speed = (hasBall ? PLAYER_CONF.DRIBBLE_SPEED : PLAYER_CONF.RUN_SPEED) * p.effSpeedMult;
     if (charging) speed *= 0.4;   // シュートを溜めている間は減速
+
+    this.updatePassPreview(p, ax);
 
     if (ax) {
       p.moveTarget = { x: p.pos.x + ax.x * 10, y: p.pos.y + ax.y * 10 };
@@ -454,22 +567,12 @@ class Game {
 
     if (hasBall) {
       // ---- 攻撃時: Z = パス / X = シュート (長押しで強く) ----
-      // 相手ゴールライン際のサイド (isCrossZone) では、Z の長押しで
-      // 自動的にクロス (センタリング) が上がる。タップですぐ離せば通常のパス
+      // Z はタップで通常パス、長押しで「クロス」(相手ゴールライン際のサイド)
+      // または「スルーパス」(それ以外) になる
       const inCrossZone = this.isCrossZone(p);
       if (input.wasPressed("KeyZ")) {
-        if (inCrossZone) {
-          this.crossCharge = 0;
-        } else {
-          const dir = ax || { x: p.facing.x, y: p.facing.y };
-          const target = this.pickPassTarget(p, dir, false);
-          if (target) {
-            this.pass(p, target);
-            this.controlled = target;       // パスと同時に受け手へ操作を移す
-            this.switchLock = 0.4;
-          }
-          return;
-        }
+        if (inCrossZone) this.crossCharge = 0;
+        else this.passCharge = 0;
       }
       if (this.crossCharge >= 0) {
         this.crossCharge += dt;
@@ -477,15 +580,19 @@ class Game {
           this.cross(p);
           this.crossCharge = -1;
         } else if (input.wasReleased("KeyZ")) {
-          // 閾値に達する前に離したら、通常のタップパスとして扱う
-          const dir = ax || { x: p.facing.x, y: p.facing.y };
-          const target = this.pickPassTarget(p, dir, false);
-          if (target) {
-            this.pass(p, target);
-            this.controlled = target;
-            this.switchLock = 0.4;
-          }
+          this.doUserPass(p, ax);   // 閾値前に離したら通常のタップパス
           this.crossCharge = -1;
+        }
+        return;
+      }
+      if (this.passCharge >= 0) {
+        this.passCharge += dt;
+        if (this.passCharge >= THROUGH_CONF.HOLD_TIME) {
+          this.doUserThroughPass(p, ax);
+          this.passCharge = -1;
+        } else if (input.wasReleased("KeyZ")) {
+          this.doUserPass(p, ax);
+          this.passCharge = -1;
         }
         return;
       }
@@ -533,6 +640,7 @@ class Game {
   // origin からパスを出す (通常のパスとワンタッチパスで共用)
   passFrom(from, origin, to, powerMul = 1) {
     if (this.checkOffside(from, to)) { this.callOffside(from, to); return; }
+    this.pendingPassKind = "pass";
     const d = dist(origin, to.pos);
     const speed = clamp(9 + d * 0.85,
       ACTION_CONF.PASS_SPEED_MIN, ACTION_CONF.PASS_SPEED_MAX) * powerMul;
@@ -584,6 +692,7 @@ class Game {
     const target = this.crossTarget(p);
     this.ball.launchCross(p, target, CROSS_CONF.SPEED);
     p.thinkTimer = 0.3;
+    this.pendingPassKind = "cross";
   }
 
   crossTarget(p) {
@@ -641,13 +750,22 @@ class Game {
   shootFrom(p, origin, aimY, power) {
     const goalX = PITCH.HALF_LEN * p.team.attackDir;
     const dGoal = Math.hypot(goalX - origin.x, origin.y);
-    // 近距離ほど正確。強打の精度ペナルティは控えめにして溜める価値を出す
-    const err = (Math.random() - 0.5) * (0.8 + power * 1.0 + dGoal * 0.1);
+    // 近距離ほど正確。強打の精度ペナルティは控えめにして溜める価値を出す。
+    // ゾーン中は誤差が小さくなり、狙ったコースへ飛びやすい
+    const zoneErr = p.team.inZone ? MOMENTUM_CONF.ZONE_SHOOT_ERR : 1;
+    const err = (Math.random() - 0.5) * (0.8 + power * 1.0 + dGoal * 0.1) * zoneErr;
     const targetY = clamp(aimY, -(PITCH.GOAL_HALF - 0.5), PITCH.GOAL_HALF - 0.5) + err;
     const speed = ACTION_CONF.SHOOT_SPEED_MIN +
       power * (ACTION_CONF.SHOOT_SPEED_MAX - ACTION_CONF.SHOOT_SPEED_MIN);
     const dir = normTo(origin, { x: goalX, y: targetY });
     this.ball.kick(p, dir, speed);
+    this.pendingPassKind = null;
+
+    // 枠内へ飛んだシュートはモメンタムを加点し、終盤ならスローモー演出
+    if (Math.abs(targetY) <= PITCH.GOAL_HALF) {
+      p.team.addMomentum(MOMENTUM_CONF.GAIN.shotOnTarget);
+      this.maybeDramaSlowmo();
+    }
   }
 
   // ---------------- ワンタッチアクション (ダイレクトシュート / ワンタッチパス) ----------------
@@ -683,6 +801,57 @@ class Game {
     this.volley.passActive = windowOpen && !this.volley.passFailed;
   }
 
+  // ---------------- ユーザーのパス操作 ----------------
+
+  // 通常パス (Zタップ)。パスと同時に受け手へ操作を移す
+  doUserPass(p, ax) {
+    const dir = ax || { x: p.facing.x, y: p.facing.y };
+    const target = this.pickPassTarget(p, dir, false);
+    if (!target) return;
+    this.pass(p, target);
+    this.controlled = target;
+    this.switchLock = 0.4;
+  }
+
+  // スルーパス (Z長押し)。受け手の足元ではなく「前のスペース」へ転がし、
+  // 受け手が走り込む。オフサイドはパスを出した瞬間の位置で判定されるため、
+  // 「ラインの裏を取る」駆け引きになる
+  doUserThroughPass(p, ax) {
+    const dir = ax || { x: p.facing.x, y: p.facing.y };
+    const target = this.pickPassTarget(p, dir, false);
+    if (!target) return;
+    if (this.checkOffside(p, target)) { this.callOffside(p, target); return; }
+
+    const spot = this.throughSpot(p, target);
+    const d = dist(p.pos, spot);
+    const speed = clamp(d * THROUGH_CONF.SPEED_K,
+      THROUGH_CONF.SPEED_MIN, THROUGH_CONF.SPEED_MAX);
+    this.ball.kick(p, normTo(p.pos, spot), speed);
+    this.controlled = target;   // 走り込む選手に操作を移す
+    this.switchLock = 0.5;
+    this.pendingPassKind = "through";
+    this.showBanner("スルーパス!", 0.7);
+  }
+
+  // スルーパスの落とし所 (受け手の前方スペース)。描画側のプレビューと共用
+  throughSpot(from, target) {
+    const dir = from.team.attackDir;
+    return {
+      x: clamp(target.pos.x + dir * THROUGH_CONF.LEAD,
+        -(PITCH.HALF_LEN - 2), PITCH.HALF_LEN - 2),
+      y: clamp(target.pos.y, -(PITCH.HALF_WID - 2), PITCH.HALF_WID - 2),
+    };
+  }
+
+  // ボール保持中、今 Z を離したら誰へパスが行くかを毎フレーム求めておく
+  // (render.js がマーカーを描画するために使う)
+  updatePassPreview(p, ax) {
+    const hasBall = this.ball.owner === p;
+    if (!hasBall || p.isGK || p.busy) { this.passTarget = null; return; }
+    const dir = ax || { x: p.facing.x, y: p.facing.y };
+    this.passTarget = this.pickPassTarget(p, dir, false);
+  }
+
   // ダイレクトシュートの実行: トラップせずボールの現在位置から直接ゴールへ。
   // ボールが浮き球 (クロス) なら「ヘディングシュート」として扱い、長押し
   // 強シュートと同じフルパワーで撃つ (通常のダイレクトボレーはやや抑えめ)
@@ -703,6 +872,7 @@ class Game {
     this.passFrom(p, this.ball.pos, target);
     this.controlled = target;
     this.switchLock = 0.4;
+    this.pendingPassKind = "oneTouch";
     this.volley = null;
   }
 
@@ -888,11 +1058,20 @@ class Game {
     this.freezeTimer = 2.5;
     this.showBanner("GOAL!!  " + team.name, 2.4);
     this.pendingKickoffTeam = this.otherTeam(team);
+    // モメンタム: 得点側は大きく加点、失点側は大きく減点
+    team.addMomentum(MOMENTUM_CONF.GAIN.goal);
+    this.otherTeam(team).addMomentum(-MOMENTUM_CONF.LOSS.conceded);
+    // 演出: ヒットストップ + 画面シェイク
+    this.addHitstop(FX_CONF.HITSTOP_GOAL);
+    this.addShake(FX_CONF.SHAKE_GOAL);
+    this.breakaway = null;
   }
 
   // アウトオブプレー後のリスタート (キックイン / コーナー / ゴールキック)
   doRestart(label, team, pos, useGK = false) {
     this.ball.reset(pos);
+    this.pendingPassKind = null;
+    this.breakaway = null;
 
     // 仕切り直し: ファウルで転んだ/スライディング中だった等、選手の
     // アクション状態をそのまま引きずって再開しない (ドリブル・接触の
@@ -933,6 +1112,170 @@ class Game {
     this.restartPassOnly = true;
     this.restartTaker = taker;
     this.setFreeze(1.1, label);
+  }
+
+  // ---------------- 1対1 (ブレイクアウェイ) ----------------
+  //  DFを振り切って GK と1対1になった瞬間、PK と同じコース読み合いの
+  //  ミニゲームに突入する。読み合いの構造 (phase/choice) は PK と共通なので、
+  //  描画 (render.js の drawPKView) はそのまま流用できる。
+  //  PK と違い、外した場合もプレーは止まらず通常の試合に戻る。
+
+  // 毎フレーム、ブレイクアウェイの発動条件を満たしたかを調べる
+  checkBreakaway() {
+    if (this.breakawayCooldown > 0 || this.restartPassOnly) return;
+    const carrier = this.ball.owner;
+    if (!carrier || carrier.isGK) return;
+
+    // 相手ゴールに十分近いか
+    const dir = carrier.team.attackDir;
+    const goalX = PITCH.HALF_LEN * dir;
+    const dGoal = Math.hypot(goalX - carrier.pos.x, carrier.pos.y);
+    if (dGoal > BREAKAWAY_CONF.TRIGGER_DIST) return;
+
+    // 追う相手フィールドプレーヤーが十分離れているか (完全に抜け出した状態)
+    for (const opp of this.opponentsOf(carrier.team)) {
+      if (opp.isGK) continue;
+      if (dist(opp.pos, carrier.pos) < BREAKAWAY_CONF.CHASE_GAP) return;
+    }
+
+    this.startBreakaway(carrier);
+  }
+
+  startBreakaway(shooter) {
+    const gk = this.otherTeam(shooter.team).gk;
+    this.breakaway = {
+      shooter, gk,
+      kickerIsUser: shooter.team.isUser,
+      keeperIsUser: !shooter.team.isUser,
+      phase: "setup",
+      timer: BREAKAWAY_CONF.SETUP_TIME,
+      kickerChoice: { col: 1, row: 0 },
+      keeperChoice: { col: 1, row: 0 },
+      kickerConfirmed: false,
+      keeperConfirmed: false,
+      cursorCooldown: 0,
+      matched: false,
+      hitPost: false,
+    };
+    this.state = "breakaway";
+    this.volley = null;
+    this.passTarget = null;
+    this.shootCharge = -1;
+    this.crossCharge = -1;
+    this.passCharge = -1;
+    this.controlled = shooter.team.isUser ? shooter : gk;
+    this.showBanner("1対1!!", 1.2);
+  }
+
+  updateBreakaway(dt, input) {
+    const bw = this.breakaway;
+    if (!bw) { this.state = "playing"; return; }
+
+    if (bw.phase === "setup") {
+      bw.timer -= dt;
+      if (bw.timer <= 0) {
+        bw.phase = "aim";
+        bw.timer = BREAKAWAY_CONF.AIM_TIME;
+        bw.aimTotal = BREAKAWAY_CONF.AIM_TIME;
+        bw.cpuKickerDecideAt = rand(0.5, 1.4);
+        bw.cpuKeeperDecideAt = rand(0.5, 1.4);
+      }
+      return;
+    }
+
+    if (bw.phase === "aim") {
+      this.updateDuelAim(bw, dt, input, BREAKAWAY_CONF.ANIM_TIME);
+      return;
+    }
+
+    if (bw.phase === "anim") {
+      bw.timer -= dt;
+      if (bw.timer <= 0) this.resolveBreakaway();
+    }
+  }
+
+  // PK / ブレイクアウェイ共通のコース読み合い処理。
+  // 双方が確定した時点で一致判定を行い、anim フェーズへ移す
+  updateDuelAim(duel, dt, input, animTime) {
+    duel.timer -= dt;
+    duel.cursorCooldown = Math.max(0, duel.cursorCooldown - dt);
+
+    if (duel.kickerIsUser && !duel.kickerConfirmed) {
+      this.updateDuelCursor(duel, duel.kickerChoice, input);
+      if (input.wasPressed("KeyX")) duel.kickerConfirmed = true;
+    } else if (!duel.kickerConfirmed) {
+      duel.cpuKickerDecideAt -= dt;
+      if (duel.cpuKickerDecideAt <= 0) {
+        duel.kickerChoice = randomPKZone();
+        duel.kickerConfirmed = true;
+      }
+    }
+
+    if (duel.keeperIsUser && !duel.keeperConfirmed) {
+      this.updateDuelCursor(duel, duel.keeperChoice, input);
+      if (input.wasPressed("KeyX")) duel.keeperConfirmed = true;
+    } else if (!duel.keeperConfirmed) {
+      duel.cpuKeeperDecideAt -= dt;
+      if (duel.cpuKeeperDecideAt <= 0) {
+        duel.keeperChoice = randomPKZone();
+        duel.keeperConfirmed = true;
+      }
+    }
+
+    if (duel.timer <= 0) {
+      duel.kickerConfirmed = true;
+      duel.keeperConfirmed = true;
+    }
+
+    if (duel.kickerConfirmed && duel.keeperConfirmed) {
+      duel.matched = duel.kickerChoice.col === duel.keeperChoice.col &&
+        duel.kickerChoice.row === duel.keeperChoice.row;
+      // 1対1では、読み勝っても一定確率でポストに嫌われる (PKにはない要素)
+      duel.hitPost = !duel.matched && Math.random() < 0.15;
+      duel.phase = "anim";
+      duel.timer = animTime;
+      duel.animTotal = animTime;   // 描画側が演出の進行度を出すのに使う
+    }
+  }
+
+  // ブレイクアウェイの決着。PK と違い試合は止まらず通常プレーへ戻る
+  resolveBreakaway() {
+    const bw = this.breakaway;
+    const shooter = bw.shooter, gk = bw.gk;
+    const dir = shooter.team.attackDir;
+    const goalX = PITCH.HALF_LEN * dir;
+    this.breakaway = null;
+    this.breakawayCooldown = BREAKAWAY_CONF.COOLDOWN;
+
+    if (!bw.matched && !bw.hitPost) {
+      // 読み勝ち = ゴール。onGoal がキックオフまで進めてくれる
+      this.ball.reset({ x: goalX + dir * 0.5, y: rand(-2, 2) });
+      this.ball.lastTouchTeam = shooter.team;
+      this.state = "playing";
+      this.onGoal(shooter.team);
+      return;
+    }
+
+    if (bw.hitPost) {
+      // ポスト直撃: ゴール前にこぼれ球が転がる (詰めればチャンス)
+      this.ball.reset({ x: goalX - dir * 3, y: rand(-4, 4) });
+      this.ball.vel = { x: -dir * rand(5, 9), y: rand(-6, 6) };
+      this.ball.lastTouchTeam = shooter.team;
+      this.addShake(FX_CONF.SHAKE_POST);
+      this.state = "playing";
+      this.setFreeze(0.9, "ポスト直撃!!");
+      return;
+    }
+
+    // 読み負け = GK セーブ。GK がボールを保持して再開する
+    gk.pos = { x: goalX - dir * 2, y: clamp(gk.pos.y, -4, 4) };
+    gk.state = "normal";
+    gk.stateTimer = 0;
+    this.ball.reset(gk.pos);
+    this.givePossession(gk);
+    gk.team.addMomentum(MOMENTUM_CONF.GAIN.tackle);
+    this.state = "playing";
+    this.setFreeze(0.9, "GK セーブ!!");
   }
 
   // ---------------- PK 戦 ----------------
@@ -1044,6 +1387,7 @@ class Game {
     const pk = this.pk;
     pk.phase = "aim";
     pk.timer = PK_AIM_CONF.AIM_TIME;
+    pk.aimTotal = PK_AIM_CONF.AIM_TIME;
     pk.kickerChoice = { col: 1, row: 0 };
     pk.keeperChoice = { col: 1, row: 0 };
     pk.kickerConfirmed = false;
@@ -1053,69 +1397,32 @@ class Game {
     pk.cursorCooldown = 0;   // タッチスティック等の連続入力をカーソル一段分に間引く
   }
 
+  // PK のコース選択も、1対1 と共通の読み合い処理を使う
   updatePKAim(dt, input) {
-    const pk = this.pk;
-    pk.timer -= dt;
-    pk.cursorCooldown = Math.max(0, pk.cursorCooldown - dt);
-
-    if (pk.kickerIsUser && !pk.kickerConfirmed) {
-      this.updatePKCursor(pk.kickerChoice, input);
-      if (input.wasPressed("KeyX")) pk.kickerConfirmed = true;
-    } else if (!pk.kickerConfirmed) {
-      pk.cpuKickerDecideAt -= dt;
-      if (pk.cpuKickerDecideAt <= 0) {
-        pk.kickerChoice = randomPKZone();
-        pk.kickerConfirmed = true;
-      }
-    }
-
-    if (pk.keeperIsUser && !pk.keeperConfirmed) {
-      this.updatePKCursor(pk.keeperChoice, input);
-      if (input.wasPressed("KeyX")) pk.keeperConfirmed = true;
-    } else if (!pk.keeperConfirmed) {
-      pk.cpuKeeperDecideAt -= dt;
-      if (pk.cpuKeeperDecideAt <= 0) {
-        pk.keeperChoice = randomPKZone();
-        pk.keeperConfirmed = true;
-      }
-    }
-
-    // 制限時間切れなら、今のカーソル位置のまま強制的に確定させる
-    if (pk.timer <= 0) {
-      pk.kickerConfirmed = true;
-      pk.keeperConfirmed = true;
-    }
-
-    if (pk.kickerConfirmed && pk.keeperConfirmed) {
-      pk.matched = pk.kickerChoice.col === pk.keeperChoice.col &&
-        pk.kickerChoice.row === pk.keeperChoice.row;
-      pk.phase = "anim";
-      pk.timer = PK_AIM_CONF.ANIM_TIME;
-    }
+    this.updateDuelAim(this.pk, dt, input, PK_AIM_CONF.ANIM_TIME);
   }
 
   // コース選択カーソルの移動。矢印キーは押した瞬間に1段動かす。
   // タッチジョイスティックは連続値しか取れないため、倒した方向へ
   // cursorCooldown で間引きながら1段ずつ動かす (キーボードの長押しでも
   // 同じ間引きロジックを使い、リピート入力として扱う)
-  updatePKCursor(choice, input) {
-    const pk = this.pk;
+  updateDuelCursor(duel, choice, input) {
     let moved = false;
     if (input.wasPressed("ArrowLeft")) { choice.col = Math.max(0, choice.col - 1); moved = true; }
     if (input.wasPressed("ArrowRight")) { choice.col = Math.min(PK_AIM_CONF.COLS - 1, choice.col + 1); moved = true; }
     if (input.wasPressed("ArrowUp")) { choice.row = 0; moved = true; }
     if (input.wasPressed("ArrowDown")) { choice.row = 1; moved = true; }
-    if (moved) { pk.cursorCooldown = 0.25; return; }
+    if (moved) { duel.cursorCooldown = 0.25; return; }
 
-    if (pk.cursorCooldown > 0) return;
+    if (duel.cursorCooldown > 0) return;
     const ax = input.axis();
     if (!ax) return;
     if (Math.abs(ax.x) > 0.5) {
       choice.col = clamp(choice.col + (ax.x > 0 ? 1 : -1), 0, PK_AIM_CONF.COLS - 1);
-      pk.cursorCooldown = 0.25;
+      duel.cursorCooldown = 0.25;
     } else if (Math.abs(ax.y) > 0.5) {
       choice.row = ax.y > 0 ? 1 : 0;
-      pk.cursorCooldown = 0.25;
+      duel.cursorCooldown = 0.25;
     }
   }
 
