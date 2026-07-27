@@ -519,10 +519,6 @@ class Game {
     const ax = input.axis();
     const charging = this.shootCharge >= 0 || this.crossCharge >= 0;
 
-    // スプリント: 溜め中とリスタートの出し手は不可 (その場で構える動作のため)
-    p.sprinting = input.isSprinting() && !charging && !this.restartPassOnly &&
-      ax !== null && p.canSprint();
-
     let speed = (hasBall ? PLAYER_CONF.DRIBBLE_SPEED : PLAYER_CONF.RUN_SPEED) * p.effSpeedMult;
     if (charging) speed *= 0.4;   // シュートを溜めている間は減速
 

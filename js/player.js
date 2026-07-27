@@ -29,10 +29,9 @@ class Player {
     this.goodForm = false;
     this.speedMult = rand(PLAYER_CONF.SPEED_VARIANCE_MIN, PLAYER_CONF.SPEED_VARIANCE_MAX);
 
-    // スタミナ (疲労): スプリントで大きく減り、動きを緩めれば回復する
+    // スタミナ (疲労): 動き続けると減り、動きを緩めれば回復する
     this.stamina = STAMINA_CONF.MAX;
     this.fatigueMult = 1;
-    this.sprinting = false;   // このフレームでスプリントしているか (毎フレーム再設定)
 
     // 累積ファウル数 (スライディングタックルのみ対象。2回目以降は「警告」表示)
     this.fouls = 0;
@@ -60,28 +59,17 @@ class Player {
   get busy() { return this.state !== "normal"; }
   canAct() { return this.state === "normal" && this.cooldown <= 0; }
 
-  // 個体差 (speedMult) にスタミナによる疲労補正をかけた実効速度倍率。
-  // スプリント中はさらに SPRINT_CONF.MULT 倍される
+  // 個体差 (speedMult) にスタミナによる疲労補正をかけた実効速度倍率
   get effSpeedMult() {
-    const sprint = this.sprinting ? SPRINT_CONF.MULT : 1;
     const zone = this.team.inZone ? MOMENTUM_CONF.ZONE_SPEED : 1;
-    return this.speedMult * this.fatigueMult * sprint * zone;
+    return this.speedMult * this.fatigueMult * zone;
   }
 
-  // スプリントを開始できるか。ゾーン中は息切れせず常にスプリントできる
-  canSprint() {
-    if (this.state !== "normal") return false;
-    return this.team.inZone || this.stamina >= STAMINA_CONF.SPRINT_MIN;
-  }
-
-  // スタミナの増減。スプリント中は大きく減り、動いていなければ回復する。
-  // ゾーン中はスタミナを消費しない (走り放題)
+  // スタミナの増減。動いていなければ回復する。ゾーン中は消費しない (走り放題)
   updateStamina(dt) {
     const speedRatio = clamp(vlen(this.vel) / PLAYER_CONF.RUN_SPEED, 0, 1.5);
     if (this.team.inZone) {
       this.stamina = Math.min(STAMINA_CONF.MAX, this.stamina + STAMINA_CONF.RECOVER_RATE * 0.3 * dt);
-    } else if (this.sprinting) {
-      this.stamina -= STAMINA_CONF.SPRINT_DRAIN * dt;
     } else if (speedRatio > 0.35) {
       this.stamina -= STAMINA_CONF.MOVE_DRAIN * speedRatio * dt;
     } else {
@@ -90,8 +78,6 @@ class Player {
     this.stamina = clamp(this.stamina, 0, STAMINA_CONF.MAX);
     const ratio = this.stamina / STAMINA_CONF.MAX;
     this.fatigueMult = STAMINA_CONF.MIN_MULT + (1 - STAMINA_CONF.MIN_MULT) * ratio;
-    // スタミナが尽きたらスプリントを強制解除する
-    if (this.stamina <= 0) this.sprinting = false;
   }
 
   // ------------------------------------------------------------------
@@ -278,7 +264,6 @@ class Player {
   // ------------------------------------------------------------------
   updateAI(game, dt) {
     this.moveTarget = null;
-    this.sprinting = false;   // 走り方は毎フレーム決め直す (既定はジョグ)
     if (this.busy) return;
 
     if (this.isGK) { this.aiGoalkeeper(game, dt); return; }
@@ -335,8 +320,6 @@ class Player {
     }
 
     if (this.plan && this.plan.type === "dribble") {
-      // 追われているときはスプリントで振り切りにかかる
-      this.sprinting = game.nearestOpponentDist(this) < 7 && this.canSprint();
       this.moveSpeed = PLAYER_CONF.DRIBBLE_SPEED * this.effSpeedMult * diff.aiSpeed;
       this.moveTarget = {
         x: this.pos.x + this.plan.dir.x * 8,
@@ -360,8 +343,6 @@ class Player {
         y: clamp(side * (PITCH.PENALTY_HALF_WIDTH + 6), -(PITCH.HALF_WID - 2), PITCH.HALF_WID - 2),
       };
       this.applySpacing(t, game);
-      // クロス役は前線まで駆け上がる必要があるのでスプリントする
-      this.sprinting = this.canSprint();
       this.moveSpeed = PLAYER_CONF.RUN_SPEED * this.effSpeedMult * 0.9 * diff.aiSpeed;
       this.moveTarget = t;
       return;
@@ -388,10 +369,6 @@ class Player {
         ? { x: ball.owner.pos.x, y: ball.owner.pos.y }
         : { x: ball.pos.x + ball.vel.x * 0.3, y: ball.pos.y + ball.vel.y * 0.3 };
       this.enforceRestartDistance(target, game);
-      // チェイサーはスプリントして追走し、ドリブルで振り切られないようにする。
-      // ただしスタミナを消費するため、走らされ続けた守備は最後に息切れして
-      // 振り切られる (スプリント同士の削り合いになる)
-      this.sprinting = this.canSprint();
       this.moveSpeed = PLAYER_CONF.RUN_SPEED * this.effSpeedMult * diff.aiSpeed;
       this.moveTarget = target;
 

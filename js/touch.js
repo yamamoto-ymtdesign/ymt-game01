@@ -35,18 +35,12 @@ function setupTouchControls(input) {
     }
     stickKnob.style.transform = `translate(${dx}px, ${dy}px)`;
     input.setTouchAxis(d < deadzone ? null : norm(dx, dy));
-    // 外周まで倒し込んでいる間はスプリント (ボタンを増やさずに済む)
-    const sprinting = d >= stickRadius * SPRINT_CONF.STICK_RATIO;
-    input.setTouchSprint(sprinting);
-    stickKnob.classList.toggle("sprinting", sprinting);
   }
 
   function stickEnd() {
     stickTouchId = null;
     stickKnob.style.transform = "translate(0, 0)";
-    stickKnob.classList.remove("sprinting");
     input.setTouchAxis(null);
-    input.setTouchSprint(false);
   }
 
   stickBase.addEventListener("touchstart", (e) => {

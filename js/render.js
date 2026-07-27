@@ -518,30 +518,13 @@ class Renderer {
         ctx.fillRect(x - gw / 2 + 1, y - h - 29, (gw - 2) * ratio, gh - 2);
       }
 
-      // スタミナゲージ (足元のリングの下)。スプリント中は枠を光らせる
+      // スタミナゲージ (足元のリングの下)
       const staminaRatio = p.stamina / STAMINA_CONF.MAX;
       const sw = 30, sh = 4, sy = y + cell * 2 + 9;
       ctx.fillStyle = "rgba(0,0,0,0.5)";
       ctx.fillRect(x - sw / 2, sy, sw, sh);
       ctx.fillStyle = staminaRatio > 0.5 ? "#7ee36a" : staminaRatio > 0.25 ? "#ff8b3d" : "#e04a3a";
       ctx.fillRect(x - sw / 2 + 1, sy + 1, (sw - 2) * clamp(staminaRatio, 0, 1), sh - 2);
-      if (p.sprinting) {
-        ctx.strokeStyle = "#ffe14d";
-        ctx.lineWidth = 1.5;
-        ctx.strokeRect(x - sw / 2 - 1, sy - 1, sw + 2, sh + 2);
-      }
-    }
-
-    // スプリント中は足元に砂煙 (誰でも。加速しているのが一目で分かる)
-    if (p.sprinting && vlen(p.vel) > 2) {
-      const back = norm(-p.vel.x, -p.vel.y);
-      ctx.fillStyle = "rgba(255,255,255,0.28)";
-      for (let i = 1; i <= 2; i++) {
-        const d = cell * 3 * i;
-        ctx.beginPath();
-        ctx.arc(x + back.x * d, y + cell * 2 + back.y * d, cell * (2.2 - i * 0.6), 0, Math.PI * 2);
-        ctx.fill();
-      }
     }
   }
 
@@ -989,9 +972,9 @@ class Renderer {
       ? "矢印: 向き変更   Z: パス (リスタートはパスのみ)"
       : !game.userDefending()
       ? (inCrossZone
-          ? "矢印: ドリブル   Shift: スプリント   Z長押し: クロス   X(長押し): シュート"
-          : "矢印: ドリブル   Shift: スプリント   Z: パス / 長押し: スルーパス   X(長押し): シュート")
-      : "矢印: 移動   Shift: スプリント   Z/X: スライディング   Space: 選手切替";
+          ? "矢印: ドリブル   Z長押し: クロス   X(長押し): シュート"
+          : "矢印: ドリブル   Z: パス / 長押し: スルーパス   X(長押し): シュート")
+      : "矢印: 移動   Z/X: スライディング   Space: 選手切替";
     ctx.fillStyle = "rgba(0,0,0,0.55)";
     this.roundRect(ctx, 10, this.canvas.height - 34, 620, 24, 6);
     ctx.fill();

@@ -16,7 +16,6 @@
 const HANDLED_KEYS = new Set([
   "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
   "Space", "KeyZ", "KeyX", "Enter", "Escape",
-  "ShiftLeft", "ShiftRight",
 ]);
 
 class Input {
@@ -25,7 +24,6 @@ class Input {
     this.pressed = new Set();
     this.released = new Set();
     this.touchAxis = null;   // タッチジョイスティックのベクトル (null = 無効)
-    this.touchSprint = false; // タッチ: スティックを外周まで倒しているか
 
     window.addEventListener("keydown", (e) => {
       if (HANDLED_KEYS.has(e.code)) e.preventDefault();
@@ -39,7 +37,6 @@ class Input {
     window.addEventListener("blur", () => {
       this.down.clear();
       this.touchAxis = null;
-      this.touchSprint = false;
     });
   }
 
@@ -60,17 +57,10 @@ class Input {
   buttonUp(code) { this._release(code); }
   // vec: {x,y} の単位〜非単位ベクトル。null で解除 (キーボード判定に戻す)
   setTouchAxis(vec) { this.touchAxis = vec; }
-  setTouchSprint(on) { this.touchSprint = !!on; }
 
   isDown(code) { return this.down.has(code); }
   wasPressed(code) { return this.pressed.has(code); }
   wasReleased(code) { return this.released.has(code); }
-
-  // スプリント入力中か (Shift、またはタッチのスティック外周)
-  isSprinting() {
-    return this.touchSprint ||
-      this.isDown("ShiftLeft") || this.isDown("ShiftRight");
-  }
 
   // 移動方向の単位ベクトルを得る。入力が無ければ null
   axis() {
