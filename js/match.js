@@ -71,10 +71,6 @@ class Game {
     // モメンタム: 直前のパスの種類 (加点の重み付けに使う)
     this.pendingPassKind = null;
 
-    // 1対1 (ブレイクアウェイ)
-    this.breakaway = null;
-    this.breakawayCooldown = BREAKAWAY_CONF.COOLDOWN * 0.5;
-
     // 演出 (画面効果)
     this.shake = 0;               // 画面シェイクの残り強度
     this.hitstop = 0;             // 画面を止めている残り時間 (実時間)
@@ -325,7 +321,6 @@ class Game {
       if (this.offsideFlash.timer <= 0) this.offsideFlash = null;
     }
     this.switchLock = Math.max(0, this.switchLock - dt);
-    this.breakawayCooldown = Math.max(0, this.breakawayCooldown - dt);
     this.updateMomentum(dt);
 
     switch (this.state) {
@@ -356,9 +351,6 @@ class Game {
         this.updatePlay(dt, input);
         break;
       }
-      case "breakaway":
-        this.updateBreakaway(dt, input);
-        break;
       case "pk":
         this.updatePK(dt, input);
         break;
@@ -396,7 +388,6 @@ class Game {
     this.ball.update(dt);
     if (!this.ball.owner) this.tryPickups();
     this.checkGoalAndOut();
-    if (this.state === "playing") this.checkBreakaway();
   }
 
   // ---------------- 操作キャラの自動切替 ----------------
@@ -1064,14 +1055,12 @@ class Game {
     // 演出: ヒットストップ + 画面シェイク
     this.addHitstop(FX_CONF.HITSTOP_GOAL);
     this.addShake(FX_CONF.SHAKE_GOAL);
-    this.breakaway = null;
   }
 
   // アウトオブプレー後のリスタート (キックイン / コーナー / ゴールキック)
   doRestart(label, team, pos, useGK = false) {
     this.ball.reset(pos);
     this.pendingPassKind = null;
-    this.breakaway = null;
 
     // 仕切り直し: ファウルで転んだ/スライディング中だった等、選手の
     // アクション状態をそのまま引きずって再開しない (ドリブル・接触の
@@ -1114,87 +1103,7 @@ class Game {
     this.setFreeze(1.1, label);
   }
 
-  // ---------------- 1対1 (ブレイクアウェイ) ----------------
-  //  DFを振り切って GK と1対1になった瞬間、PK と同じコース読み合いの
-  //  ミニゲームに突入する。読み合いの構造 (phase/choice) は PK と共通なので、
-  //  描画 (render.js の drawPKView) はそのまま流用できる。
-  //  PK と違い、外した場合もプレーは止まらず通常の試合に戻る。
-
-  // 毎フレーム、ブレイクアウェイの発動条件を満たしたかを調べる
-  checkBreakaway() {
-    if (this.breakawayCooldown > 0 || this.restartPassOnly) return;
-    const carrier = this.ball.owner;
-    if (!carrier || carrier.isGK) return;
-
-    // 相手ゴールに十分近いか
-    const dir = carrier.team.attackDir;
-    const goalX = PITCH.HALF_LEN * dir;
-    const dGoal = Math.hypot(goalX - carrier.pos.x, carrier.pos.y);
-    if (dGoal > BREAKAWAY_CONF.TRIGGER_DIST) return;
-
-    // 追う相手フィールドプレーヤーが十分離れているか (完全に抜け出した状態)
-    for (const opp of this.opponentsOf(carrier.team)) {
-      if (opp.isGK) continue;
-      if (dist(opp.pos, carrier.pos) < BREAKAWAY_CONF.CHASE_GAP) return;
-    }
-
-    this.startBreakaway(carrier);
-  }
-
-  startBreakaway(shooter) {
-    const gk = this.otherTeam(shooter.team).gk;
-    this.breakaway = {
-      shooter, gk,
-      kickerIsUser: shooter.team.isUser,
-      keeperIsUser: !shooter.team.isUser,
-      phase: "setup",
-      timer: BREAKAWAY_CONF.SETUP_TIME,
-      kickerChoice: { col: 1, row: 0 },
-      keeperChoice: { col: 1, row: 0 },
-      kickerConfirmed: false,
-      keeperConfirmed: false,
-      cursorCooldown: 0,
-      matched: false,
-      hitPost: false,
-    };
-    this.state = "breakaway";
-    this.volley = null;
-    this.passTarget = null;
-    this.shootCharge = -1;
-    this.crossCharge = -1;
-    this.passCharge = -1;
-    this.controlled = shooter.team.isUser ? shooter : gk;
-    this.showBanner("1対1!!", 1.2);
-  }
-
-  updateBreakaway(dt, input) {
-    const bw = this.breakaway;
-    if (!bw) { this.state = "playing"; return; }
-
-    if (bw.phase === "setup") {
-      bw.timer -= dt;
-      if (bw.timer <= 0) {
-        bw.phase = "aim";
-        bw.timer = BREAKAWAY_CONF.AIM_TIME;
-        bw.aimTotal = BREAKAWAY_CONF.AIM_TIME;
-        bw.cpuKickerDecideAt = rand(0.5, 1.4);
-        bw.cpuKeeperDecideAt = rand(0.5, 1.4);
-      }
-      return;
-    }
-
-    if (bw.phase === "aim") {
-      this.updateDuelAim(bw, dt, input, BREAKAWAY_CONF.ANIM_TIME);
-      return;
-    }
-
-    if (bw.phase === "anim") {
-      bw.timer -= dt;
-      if (bw.timer <= 0) this.resolveBreakaway();
-    }
-  }
-
-  // PK / ブレイクアウェイ共通のコース読み合い処理。
+  // PK のコース読み合い処理。
   // 双方が確定した時点で一致判定を行い、anim フェーズへ移す
   updateDuelAim(duel, dt, input, animTime) {
     duel.timer -= dt;
@@ -1230,52 +1139,10 @@ class Game {
     if (duel.kickerConfirmed && duel.keeperConfirmed) {
       duel.matched = duel.kickerChoice.col === duel.keeperChoice.col &&
         duel.kickerChoice.row === duel.keeperChoice.row;
-      // 1対1では、読み勝っても一定確率でポストに嫌われる (PKにはない要素)
-      duel.hitPost = !duel.matched && Math.random() < 0.15;
       duel.phase = "anim";
       duel.timer = animTime;
       duel.animTotal = animTime;   // 描画側が演出の進行度を出すのに使う
     }
-  }
-
-  // ブレイクアウェイの決着。PK と違い試合は止まらず通常プレーへ戻る
-  resolveBreakaway() {
-    const bw = this.breakaway;
-    const shooter = bw.shooter, gk = bw.gk;
-    const dir = shooter.team.attackDir;
-    const goalX = PITCH.HALF_LEN * dir;
-    this.breakaway = null;
-    this.breakawayCooldown = BREAKAWAY_CONF.COOLDOWN;
-
-    if (!bw.matched && !bw.hitPost) {
-      // 読み勝ち = ゴール。onGoal がキックオフまで進めてくれる
-      this.ball.reset({ x: goalX + dir * 0.5, y: rand(-2, 2) });
-      this.ball.lastTouchTeam = shooter.team;
-      this.state = "playing";
-      this.onGoal(shooter.team);
-      return;
-    }
-
-    if (bw.hitPost) {
-      // ポスト直撃: ゴール前にこぼれ球が転がる (詰めればチャンス)
-      this.ball.reset({ x: goalX - dir * 3, y: rand(-4, 4) });
-      this.ball.vel = { x: -dir * rand(5, 9), y: rand(-6, 6) };
-      this.ball.lastTouchTeam = shooter.team;
-      this.addShake(FX_CONF.SHAKE_POST);
-      this.state = "playing";
-      this.setFreeze(0.9, "ポスト直撃!!");
-      return;
-    }
-
-    // 読み負け = GK セーブ。GK がボールを保持して再開する
-    gk.pos = { x: goalX - dir * 2, y: clamp(gk.pos.y, -4, 4) };
-    gk.state = "normal";
-    gk.stateTimer = 0;
-    this.ball.reset(gk.pos);
-    this.givePossession(gk);
-    gk.team.addMomentum(MOMENTUM_CONF.GAIN.tackle);
-    this.state = "playing";
-    this.setFreeze(0.9, "GK セーブ!!");
   }
 
   // ---------------- PK 戦 ----------------
@@ -1397,7 +1264,7 @@ class Game {
     pk.cursorCooldown = 0;   // タッチスティック等の連続入力をカーソル一段分に間引く
   }
 
-  // PK のコース選択も、1対1 と共通の読み合い処理を使う
+  // PK のコース選択 (読み合い処理は updateDuelAim にまとめてある)
   updatePKAim(dt, input) {
     this.updateDuelAim(this.pk, dt, input, PK_AIM_CONF.ANIM_TIME);
   }

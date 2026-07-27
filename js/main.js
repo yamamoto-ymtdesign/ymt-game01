@@ -61,9 +61,8 @@ window.addEventListener("DOMContentLoaded", () => {
   // PK戦のコース選択中は Z を使わないので隠し、X は「決定」表記にする
   function updateTouchLabels() {
     if (!touchBtnZ || !touchBtnX || !game) return;
-    // PK戦・1対1 のコース選択中は Z を使わないので隠し、X は「決定」表記にする
-    const duel = game.state === "breakaway" ? game.breakaway
-      : (game.state === "pk" ? game.pk : null);
+    // PK戦のコース選択中は Z を使わないので隠し、X は「決定」表記にする
+    const duel = game.state === "pk" ? game.pk : null;
     if (duel && duel.phase === "aim") {
       touchBtnZ.textContent = "-";
       touchBtnX.textContent = "決定";
@@ -261,10 +260,9 @@ window.addEventListener("DOMContentLoaded", () => {
     lastTime = now;
 
     if (game) {
-      // Esc でポーズ切替 (ハーフタイム・試合終了・読み合い中は無効)
+      // Esc でポーズ切替 (ハーフタイム・試合終了中は無効)
       if (input.wasPressed("Escape") &&
-          game.state !== "halftime" && game.state !== "fulltime" &&
-          game.state !== "breakaway") {
+          game.state !== "halftime" && game.state !== "fulltime") {
         paused = !paused;
         showScreen(paused ? "pause" : null);
       }

@@ -274,7 +274,7 @@ class Renderer {
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     if (!game) { this.drawPitch(); return; }
 
-    // PK戦・1対1 のコース選択〜演出中は、通常のピッチ俯瞰の代わりに
+    // PK戦のコース選択〜演出中は、通常のピッチ俯瞰の代わりに
     // 1人称視点のゴール正面ビューを描く (配置直後の setup フェーズだけは
     // 通常のピッチで選手の並びを見せる)
     const duel = this.activeDuel(game);
@@ -293,12 +293,8 @@ class Renderer {
     this.drawHud(game);
   }
 
-  // 今 1人称ビューで描くべき読み合い (PK or 1対1) を返す。無ければ null
+  // 今 1人称ビューで描くべき読み合い (PK) を返す。無ければ null
   activeDuel(game) {
-    if (game.state === "breakaway" && game.breakaway &&
-        game.breakaway.phase !== "setup") {
-      return game.breakaway;
-    }
     if (game.state === "pk_done") return game.pk;
     if (game.state === "pk" && game.pk && game.pk.phase !== "setup") return game.pk;
     return null;
@@ -605,7 +601,7 @@ class Renderer {
     return { x: rect.left + cw * (col + 0.5), y: rect.top + ch * (row + 0.5) };
   }
 
-  // PK戦・1対1 で共通の1人称ビュー。duel は phase/choice/shooter/gk を持つ
+  // PK戦の1人称ビュー。duel は phase/choice/shooter/gk を持つ
   drawDuelView(game, duel) {
     if (duel.keeperIsUser) this.drawPKKeeperView(game, duel);
     else this.drawPKKickerView(game, duel);
@@ -974,10 +970,9 @@ class Renderer {
           game.volley.passActive ? "Z: ワンタッチパス!!" : null,
         ].filter(Boolean).join("   ")
       : null;
-    // PK / 1対1 の読み合い中は、どちらの役かに応じたガイドを出す
-    const duel = (game.state === "breakaway" && game.breakaway) ? game.breakaway
-      : (inPK ? game.pk : null);
-    const duelLabel = game.state === "breakaway" ? "1対1" : "PK戦";
+    // PK の読み合い中は、どちらの役かに応じたガイドを出す
+    const duel = inPK ? game.pk : null;
+    const duelLabel = "PK戦";
     const guide = duel
       ? (duel.phase === "aim"
           ? (duel.kickerIsUser && !duel.kickerConfirmed
